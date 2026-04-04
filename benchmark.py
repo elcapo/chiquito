@@ -21,9 +21,9 @@ def parse_preload_value(v: str) -> bool | int:
     return int(v)
 
 
-def run_once(model_id: str, preload: bool | int) -> dict:
+def run_once(model_id: str, preload: bool | int, quantization: str | None = None) -> dict:
     t0 = time.perf_counter()
-    model = AutoModel.from_pretrained(model_id, preload_to_ram=preload)
+    model = AutoModel.from_pretrained(model_id, preload_to_ram=preload, quantization=quantization)
     load_time = time.perf_counter() - t0
 
     tokens = model.tokenizer(PROMPT, return_tensors="pt")
@@ -59,6 +59,12 @@ def main():
         default=["true", "false", "5"],
         help="preload_to_ram values to benchmark (true, false, or integer window sizes)",
     )
+    parser.add_argument(
+        "--quantization",
+        default=None,
+        choices=["4bit", "8bit"],
+        help="on-the-fly quantization via bitsandbytes (requires bitsandbytes installed)",
+    )
     args = parser.parse_args()
 
     preload_values = [parse_preload_value(v) for v in args.preload]
@@ -66,12 +72,14 @@ def main():
     print(f"Model:  {args.model}")
     print(f"Prompt: {PROMPT!r}")
     print(f"Modes:  {preload_values}")
+    if args.quantization:
+        print(f"Quant:  {args.quantization}")
     print()
 
     results = []
     for preload in preload_values:
         print(f"--- preload_to_ram={preload} ---")
-        r = run_once(args.model, preload)
+        r = run_once(args.model, preload, quantization=args.quantization)
         results.append(r)
         print(f"    Output: {r['text']}")
         print()

@@ -9,4 +9,5 @@ This documentation explains the concepts behind Chiquito and how the code implem
 3. [Layer Splitting](03-layer-splitting.md): How HuggingFace checkpoints are broken into per-layer files.
 4. [RAM Preloading and the Sliding Window](04-ram-preloading.md): The three loading modes and the producer-consumer pattern behind the sliding window.
 5. [The Forward Pass](05-forward-pass.md): Layer by layer inference, KV cache, and the interaction with `GenerationMixin`.
-6. [Extending Chiquito](06-extending.md): How to add support for new model architectures.
+6. [Quantization](06-quantization.md): On-the-fly 4-bit and 8-bit quantization via bitsandbytes.
+7. [Extending Chiquito](07-extending.md): How to add support for new model architectures.

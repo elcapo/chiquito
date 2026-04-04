@@ -55,6 +55,18 @@ model = AutoModel.from_pretrained(
 )
 ```
 
+To enable on-the-fly 4-bit quantization (requires [bitsandbytes](https://github.com/bitsandbytes-foundation/bitsandbytes)):
+
+```python
+model = AutoModel.from_pretrained(
+    "Qwen/Qwen2.5-Coder-32B-Instruct",
+    preload_to_ram=True,
+    quantization="4bit",  # or "8bit"
+)
+```
+
+This reduces weight transfer times by ~4x (4-bit) or ~2x (8-bit) and makes large models fit in RAM. A 32B model goes from ~65 GB to ~16 GB with 4-bit quantization.
+
 ## Benchmarks
 
 Test system: Intel Core i9-10980HK, 64 GB RAM, NVIDIA RTX 2080 Super (8 GB VRAM).

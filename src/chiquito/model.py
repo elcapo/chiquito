@@ -112,12 +112,14 @@ class ChiquitoModel(GenerationMixin):
         preload_to_ram: bool | int = True,
         hf_token: str | None = None,
         prefetch: bool = True,
+        quantization: str | None = None,
     ):
         self._device = torch.device(device)
         self._dtype = dtype
         self.max_seq_len = max_seq_len
         self._hf_token = hf_token
         self._prefetch = prefetch
+        self._quantization = quantization
         self._ram_cache: dict[str, dict[str, torch.Tensor]] | None = None
         self._window_cache: _SlidingWindowCache | None = None
         self._window_size: int | None = None
@@ -205,9 +207,27 @@ class ChiquitoModel(GenerationMixin):
                     self.config, trust_remote_code=True
                 )
 
-        # Handle HF quantization config if present
+        # Handle quantization
         quantization_config = getattr(self.config, "quantization_config", None)
-        if quantization_config is not None:
+        if self._quantization is not None:
+            from transformers import BitsAndBytesConfig
+            from transformers.quantizers import AutoHfQuantizer
+
+            if self._quantization == "4bit":
+                bnb_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=self._dtype,
+                    bnb_4bit_quant_type="nf4",
+                )
+            elif self._quantization == "8bit":
+                bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+            else:
+                raise ValueError(f"Unknown quantization: {self._quantization!r}. Use '4bit' or '8bit'.")
+
+            self.hf_quantizer = AutoHfQuantizer.from_config(bnb_config)
+            device_map = self.hf_quantizer.update_device_map(None)
+            self.hf_quantizer.preprocess_model(model=self.model, device_map=device_map)
+        elif quantization_config is not None:
             from transformers.quantizers import AutoHfQuantizer
 
             self.hf_quantizer = AutoHfQuantizer.from_config(
@@ -296,31 +316,15 @@ class ChiquitoModel(GenerationMixin):
         return load_safetensors(layer_file_path(self._split_dir, layer_name))
 
     def _move_layer_to_device(self, state_dict: dict[str, torch.Tensor]) -> list[str]:
-        moved = []
-        for param_name in state_dict:
-            if self.hf_quantizer is None:
-                moved.append(param_name)
-            else:
-                if ".weight" in param_name:
-                    layer_name = param_name[: param_name.index(".weight") + len(".weight")]
-                    if layer_name not in moved:
-                        moved.append(layer_name)
-
+        moved = list(state_dict.keys())
         for param_name in moved:
-            if self.hf_quantizer is None or not self.hf_quantizer.check_quantized_param(
-                self.model, param_value=None, param_name=param_name, state_dict={}
-            ):
-                set_module_tensor_to_device(
-                    self.model,
-                    param_name,
-                    self._device,
-                    value=state_dict[param_name],
-                    dtype=self._dtype,
-                )
-            else:
-                self.hf_quantizer.create_quantized_param(
-                    self.model, state_dict[param_name], param_name, self._device, state_dict
-                )
+            set_module_tensor_to_device(
+                self.model,
+                param_name,
+                self._device,
+                value=state_dict[param_name],
+                dtype=self._dtype,
+            )
         return moved
 
     @property
@@ -419,9 +423,15 @@ class ChiquitoModel(GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[tuple, CausalLMOutputWithPast]:
-        # Reset model parameters to meta device (lightweight, no full reinit)
-        self._reset_model_to_meta()
-        clean_gpu_memory()
+        # Reset model to clean state
+        if self.hf_quantizer is not None:
+            # Quantized models need full reinit (bnb modules can't round-trip to meta)
+            del self.model
+            clean_memory()
+            self._init_model()
+        else:
+            self._reset_model_to_meta()
+            clean_gpu_memory()
 
         # Restart sliding window cache for this forward pass
         if self._window_size is not None and self._window_size > 0:
@@ -504,12 +514,8 @@ class ChiquitoModel(GenerationMixin):
                     )
 
                 # Free GPU memory (weights only, not KV cache)
-                if self.hf_quantizer is not None:
-                    for param_name in moved:
-                        set_module_tensor_to_device(self.model, param_name, "meta")
-                else:
-                    layer.to("meta")
-                layer.to("meta")
+                for param_name in moved:
+                    set_module_tensor_to_device(self.model, param_name, "meta")
                 clean_gpu_memory()
 
                 # Release layer from sliding window cache
