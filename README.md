@@ -57,6 +57,8 @@ model = AutoModel.from_pretrained(
 
 ## Benchmarks
 
+Test system: Intel Core i9-10980HK, 64 GB RAM, NVIDIA RTX 2080 Super (8 GB VRAM).
+
 Run the benchmark script to compare modes on any model:
 
 ```bash
@@ -84,6 +86,18 @@ All modes produce identical output. On a small model that fits in VRAM, generati
 | `10` | 2.82 | 373.87 | 20 | 0.05 |
 
 All modes produce identical output. With a larger model, the preload advantage starts to show: `preload_to_ram=True` is ~8% faster in generation time (361s vs 391s) thanks to pinned memory DMA transfers.
+
+### Qwen2.5-Coder 32B
+
+| preload_to_ram | load (s) | gen (s) | tokens | tok/s |
+|---|---|---|---|---|
+| `True` | — | — | — | — |
+| `False` | 5.16 | 1828.81 | 20 | 0.01 |
+| `5` | 5.20 | 1857.62 | 20 | 0.01 |
+| `10` | 4.53 | 1857.56 | 20 | 0.01 |
+| `34` | 5.22 | 1871.65 | 20 | 0.01 |
+
+`preload_to_ram=True` could not be tested — the model weighs ~65 GB in fp16, which exceeds the 64 GB of available RAM. This is the scenario the sliding window mode was designed for. All tested modes produce identical output and perform similarly, confirming that the disk prefetch keeps up with GPU execution even at this scale.
 
 ## Acknowledgments
 
