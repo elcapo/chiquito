@@ -99,6 +99,10 @@ All modes produce identical output. With a larger model, the preload advantage s
 
 `preload_to_ram=True` could not be tested — the model weighs ~65 GB in fp16, which exceeds the 64 GB of available RAM. This is the scenario the sliding window mode was designed for. All tested modes produce identical output and perform similarly, confirming that the disk prefetch keeps up with GPU execution even at this scale.
 
+## Documentation
+
+See [docs/](docs/README.md) for developer documentation covering the concepts behind the code: layer splitting, RAM preloading, the sliding window, KV cache, and how to extend Chiquito for new architectures.
+
 ## Acknowledgments
 
-The layer-by-layer inference idea comes from [AirLLM](https://github.com/lyogavin/airllm) by [Gavin Li](https://github.com/lyogavin). Chiquito is a simplified rewrite with the RAM-preloading twist, not a fork.
+The layer by layer inference idea comes from [AirLLM](https://github.com/lyogavin/airllm) by [Gavin Li](https://github.com/lyogavin). Chiquito is a simplified rewrite with the RAM-preloading twist, not a fork.
