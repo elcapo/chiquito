@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from pathlib import Path
 from typing import Optional, Union
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,6 +23,76 @@ from .utils import clean_memory, load_safetensors
 from .splitter import find_or_create_split, layer_file_path
 
 
+class _SlidingWindowCache:
+    """Bounded RAM cache that keeps at most `window_size` layers loaded,
+    with a background thread that stays ahead of consumption."""
+
+    def __init__(
+        self,
+        layer_names: list[str],
+        split_dir: Path,
+        window_size: int,
+    ):
+        self._layer_names = layer_names
+        self._split_dir = split_dir
+        self._window_size = window_size
+        self._cache: dict[str, dict[str, torch.Tensor]] = {}
+        self._lock = threading.Lock()
+        self._ready = threading.Condition(self._lock)
+        self._loader_thread: threading.Thread | None = None
+        self._next_to_load = 0
+        self._stop = False
+
+    def start(self):
+        initial_count = min(self._window_size, len(self._layer_names))
+        for i in tqdm(range(initial_count), desc="Preloading window to RAM"):
+            name = self._layer_names[i]
+            self._cache[name] = load_safetensors(
+                layer_file_path(self._split_dir, name)
+            )
+        self._next_to_load = initial_count
+        self._loader_thread = threading.Thread(
+            target=self._background_loader, daemon=True
+        )
+        self._loader_thread.start()
+
+    def get(self, layer_name: str) -> dict[str, torch.Tensor]:
+        with self._ready:
+            while layer_name not in self._cache:
+                self._ready.wait()
+            return self._cache[layer_name]
+
+    def release(self, layer_name: str):
+        with self._ready:
+            self._cache.pop(layer_name, None)
+            self._ready.notify_all()
+
+    def stop(self):
+        with self._ready:
+            self._stop = True
+            self._ready.notify_all()
+        if self._loader_thread is not None:
+            self._loader_thread.join(timeout=5)
+
+    def _background_loader(self):
+        while True:
+            with self._ready:
+                if self._stop or self._next_to_load >= len(self._layer_names):
+                    return
+                while len(self._cache) >= self._window_size:
+                    if self._stop:
+                        return
+                    self._ready.wait()
+                name = self._layer_names[self._next_to_load]
+                self._next_to_load += 1
+
+            data = load_safetensors(layer_file_path(self._split_dir, name))
+
+            with self._ready:
+                self._cache[name] = data
+                self._ready.notify_all()
+
+
 class ChiquitoModel(GenerationMixin):
 
     LAYER_NAMES = {
@@ -36,19 +108,28 @@ class ChiquitoModel(GenerationMixin):
         device: str = "cuda:0",
         dtype: torch.dtype = torch.float16,
         max_seq_len: int = 512,
-        preload_to_ram: bool = True,
+        preload_to_ram: bool | int = True,
         hf_token: str | None = None,
         prefetch: bool = True,
     ):
         self._device = torch.device(device)
         self._dtype = dtype
         self.max_seq_len = max_seq_len
-        self._preload_to_ram = preload_to_ram
         self._hf_token = hf_token
         self._prefetch = prefetch
         self._ram_cache: dict[str, dict[str, torch.Tensor]] | None = None
+        self._window_cache: _SlidingWindowCache | None = None
+        self._window_size: int | None = None
         self.hf_quantizer = None
         self.main_input_name = "input_ids"
+
+        # Interpret preload_to_ram
+        if preload_to_ram is True:
+            self._window_size = None  # load all
+        elif preload_to_ram is False:
+            self._window_size = 0  # disk only
+        else:
+            self._window_size = int(preload_to_ram)
 
         # Build layer name list before splitting
         all_layer_names = self._build_layer_name_list_from_config(model_id_or_path, hf_token)
@@ -74,9 +155,11 @@ class ChiquitoModel(GenerationMixin):
         # Create meta model and build layer references
         self._init_model()
 
-        # Preload weights to RAM if requested
-        if preload_to_ram:
+        # Preload weights to RAM
+        if self._window_size is None:
             self._preload_all_layers()
+        elif self._window_size > 0:
+            self._start_window_cache()
 
     def _build_layer_name_list_from_config(
         self, model_id_or_path: str, hf_token: str | None
@@ -185,9 +268,19 @@ class ChiquitoModel(GenerationMixin):
                 layer_file_path(self._split_dir, name)
             )
 
+    def _start_window_cache(self):
+        if self._window_cache is not None:
+            self._window_cache.stop()
+        self._window_cache = _SlidingWindowCache(
+            self.layer_names, self._split_dir, self._window_size
+        )
+        self._window_cache.start()
+
     def _load_layer_to_cpu(self, layer_name: str) -> dict[str, torch.Tensor]:
         if self._ram_cache is not None:
             return self._ram_cache[layer_name]
+        if self._window_cache is not None:
+            return self._window_cache.get(layer_name)
         return load_safetensors(layer_file_path(self._split_dir, layer_name))
 
     def _move_layer_to_device(self, state_dict: dict[str, torch.Tensor]) -> list[str]:
@@ -302,6 +395,10 @@ class ChiquitoModel(GenerationMixin):
         clean_memory()
         self._init_model()
 
+        # Restart sliding window cache for this forward pass
+        if self._window_size is not None and self._window_size > 0:
+            self._start_window_cache()
+
         input_ids = input_ids.to(self._device)
         seq_len = input_ids.shape[1]
 
@@ -317,8 +414,12 @@ class ChiquitoModel(GenerationMixin):
         position_embeddings = None
         names = self.LAYER_NAMES
 
+        # Use ThreadPoolExecutor prefetch only when NOT using sliding window
+        # (the window cache has its own background loader)
+        use_executor = self._prefetch and self._window_cache is None
+
         with torch.inference_mode():
-            executor = ThreadPoolExecutor(max_workers=1) if self._prefetch else None
+            executor = ThreadPoolExecutor(max_workers=1) if use_executor else None
             future = None
 
             if executor:
@@ -369,8 +470,14 @@ class ChiquitoModel(GenerationMixin):
                 layer.to("meta")
                 clean_memory()
 
+                # Release layer from sliding window cache
+                if self._window_cache is not None:
+                    self._window_cache.release(layer_name)
+
             if executor:
                 executor.shutdown(wait=False)
+            if self._window_cache is not None:
+                self._window_cache.stop()
 
         logits = hidden_states
         return CausalLMOutputWithPast(logits=logits)
