@@ -82,22 +82,24 @@ The detection is based on `past_key_values.get_seq_length()`: if 0, it's a prefi
 
 ### Where time goes with KV cache
 
-KV cache eliminates redundant compute but does not eliminate weight loading. Each decode step still loads all N layers from RAM/disk to GPU. For large models, this I/O dominates:
+KV cache eliminates redundant compute but does not eliminate weight loading. Each decode step still loads all N layers from RAM/disk to GPU. For large models, this I/O dominates.
 
-```
-32B model, 67 layers, ~1.4s per layer load:
-  Per decode token: 67 × 1.4s ≈ 94s
-  20 tokens: 94s × 20 ≈ 31 min
-```
+Example: 32B model (fp16), 67 layers, ~1.4s per layer load:
 
-The compute per decode step (attention over 1 token) is negligible compared to the weight transfer. This is the fundamental limitation of layer by layer inference: it trades VRAM for time.
+| Step | Layers to load | Compute | Time per step |
+|------|-----------|---------|---------------|
+| Prefill (1st token, S=8 input tokens) | 67 | Full attention over S tokens | 67 × 1.4s ≈ 94s |
+| Decode (each of the next 19 tokens) | 67 | Attention over 1 token | 67 × 1.4s ≈ 94s |
+| **Total (20 tokens)** | **67 × 20 = 1340** | | **~31 min** |
+
+The compute per decode step (attention over 1 token) is negligible compared to the weight transfer. Prefill and decode take roughly the same wall time because weight loading dominates both. This is the fundamental limitation of layer by layer inference: it trades VRAM for time.
 
 ## Memory cleanup
 
 After each layer, two things are freed:
 
-1. **GPU weights** — `layer.to("meta")` moves parameters back to the meta device. If an HF quantizer is active, parameters are moved individually via `set_module_tensor_to_device(model, param, "meta")`.
-2. **CUDA cache** — `clean_gpu_memory()` calls `torch.cuda.empty_cache()`. This is the lightweight variant; the full `clean_memory()` (which includes `gc.collect()` and `malloc_trim()`) is only used during model initialization.
+1. **GPU weights**: `layer.to("meta")` moves parameters back to the meta device. If an HF quantizer is active, parameters are moved individually via `set_module_tensor_to_device(model, param, "meta")`.
+2. **CUDA cache**: `clean_gpu_memory()` calls `torch.cuda.empty_cache()`. This is the lightweight variant; the full `clean_memory()` (which includes `gc.collect()` and `malloc_trim()`) is only used during model initialization.
 
 ## Model reset between forward calls
 
