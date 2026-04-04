@@ -17,6 +17,11 @@ def clean_memory():
         torch.cuda.empty_cache()
 
 
+def clean_gpu_memory():
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def load_safetensors(path: Path) -> dict[str, torch.Tensor]:
     return load_file(str(path), device="cpu")
 

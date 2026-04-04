@@ -55,6 +55,36 @@ model = AutoModel.from_pretrained(
 )
 ```
 
+## Benchmarks
+
+Run the benchmark script to compare modes on any model:
+
+```bash
+uv run python benchmark.py --model <model_id> --preload true false 5 10
+```
+
+### TinyLlama 1.1B
+
+| preload_to_ram | load (s) | gen (s) | tokens | tok/s |
+|---|---|---|---|---|
+| `True` | 7.91 | 55.10 | 20 | 0.36 |
+| `False` | 1.74 | 54.58 | 20 | 0.37 |
+| `5` | 1.74 | 55.85 | 20 | 0.36 |
+| `10` | 1.77 | 57.00 | 20 | 0.35 |
+
+All modes produce identical output. On a small model that fits in VRAM, generation speed is similar across modes. The preload overhead shows up in load time. In this case, differences are not visible as disk I/O isn't the bottleneck.
+
+### Qwen2.5-Coder 7B
+
+| preload_to_ram | load (s) | gen (s) | tokens | tok/s |
+|---|---|---|---|---|
+| `True` | 44.45 | 361.67 | 20 | 0.06 |
+| `False` | 1.74 | 391.50 | 20 | 0.05 |
+| `5` | 2.91 | 377.37 | 20 | 0.05 |
+| `10` | 2.82 | 373.87 | 20 | 0.05 |
+
+All modes produce identical output. With a larger model, the preload advantage starts to show: `preload_to_ram=True` is ~8% faster in generation time (361s vs 391s) thanks to pinned memory DMA transfers.
+
 ## Acknowledgments
 
 The layer-by-layer inference idea comes from [AirLLM](https://github.com/lyogavin/airllm) by [Gavin Li](https://github.com/lyogavin). Chiquito is a simplified rewrite with the RAM-preloading twist, not a fork.

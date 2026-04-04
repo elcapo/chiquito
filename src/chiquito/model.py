@@ -19,7 +19,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from accelerate import init_empty_weights
 from accelerate.utils.modeling import set_module_tensor_to_device
 
-from .utils import clean_memory, load_safetensors
+from .utils import clean_memory, clean_gpu_memory, load_safetensors
 from .splitter import find_or_create_split, layer_file_path
 
 
@@ -227,6 +227,15 @@ class ChiquitoModel(GenerationMixin):
                 self.model, buffer_name, self._device, value=buffer, dtype=self._dtype
             )
 
+    def _reset_model_to_meta(self):
+        """Move all parameters back to meta device without recreating the model."""
+        for name, _ in self.model.named_parameters():
+            set_module_tensor_to_device(self.model, name, "meta")
+        for buffer_name, buffer in self.model.named_buffers():
+            set_module_tensor_to_device(
+                self.model, buffer_name, self._device, value=buffer, dtype=self._dtype
+            )
+
     def _build_layers(self):
         names = self.LAYER_NAMES
         self.layers: list[nn.Module] = []
@@ -263,10 +272,12 @@ class ChiquitoModel(GenerationMixin):
 
     def _preload_all_layers(self):
         self._ram_cache = {}
+        pin = torch.cuda.is_available()
         for name in tqdm(self.layer_names, desc="Preloading layers to RAM"):
-            self._ram_cache[name] = load_safetensors(
-                layer_file_path(self._split_dir, name)
-            )
+            state_dict = load_safetensors(layer_file_path(self._split_dir, name))
+            if pin:
+                state_dict = {k: v.pin_memory() for k, v in state_dict.items()}
+            self._ram_cache[name] = state_dict
 
     def _start_window_cache(self):
         if self._window_cache is not None:
@@ -390,10 +401,9 @@ class ChiquitoModel(GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[tuple, CausalLMOutputWithPast]:
-        # Reinit model to ensure clean buffer state
-        del self.model
-        clean_memory()
-        self._init_model()
+        # Reset model parameters to meta device (lightweight, no full reinit)
+        self._reset_model_to_meta()
+        clean_gpu_memory()
 
         # Restart sliding window cache for this forward pass
         if self._window_size is not None and self._window_size > 0:
@@ -468,7 +478,7 @@ class ChiquitoModel(GenerationMixin):
                 else:
                     layer.to("meta")
                 layer.to("meta")
-                clean_memory()
+                clean_gpu_memory()
 
                 # Release layer from sliding window cache
                 if self._window_cache is not None:
