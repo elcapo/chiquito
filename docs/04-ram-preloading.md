@@ -39,17 +39,16 @@ cache.start()
 
 ### Runtime flow
 
-```
-Main thread                          Background thread
-───────────                          ─────────────────
-get("layer.0") → instant             (idle, buffer full)
-  move to GPU, execute
-release("layer.0") → frees slot      wakes up, loads layer.10
-get("layer.1") → instant
-  move to GPU, execute
-release("layer.1") → frees slot      loads layer.11
-...
-```
+| Step | Main thread | Background thread | Cache contents |
+|------|------------|-------------------|----------------|
+| init | — | — | layers 0-9 (preloaded) |
+| 1 | `get("layer.0")` → instant | idle, buffer full | layers 0-9 |
+| 2 | move to GPU, execute | idle | layers 0-9 |
+| 3 | `release("layer.0")` → frees slot | wakes up, loads layer 10 | layers 1-9 → 1-10 |
+| 4 | `get("layer.1")` → instant | loading... | layers 1-10 |
+| 5 | move to GPU, execute | idle | layers 1-10 |
+| 6 | `release("layer.1")` → frees slot | wakes up, loads layer 11 | layers 2-10 → 2-11 |
+| ... | ... | ... | ... |
 
 ### Synchronization
 

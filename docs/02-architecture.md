@@ -22,36 +22,55 @@ Chiquito builds on top of the HuggingFace ecosystem:
 
 ## Data flow
 
-```
-AutoModel.from_pretrained("model_id")
-│
-├─ Detect architecture from config
-├─ Instantiate ChiquitoModel
-│   │
-│   ├─ find_or_create_split()
-│   │   ├─ resolve_model_path()      → download or locate local model
-│   │   └─ split_and_save_layers()   → one .safetensors file per layer
-│   │
-│   ├─ _init_model()
-│   │   ├─ init_empty_weights()      → model on meta device (0 bytes)
-│   │   ├─ AutoModelForCausalLM.from_config()
-│   │   └─ move buffers to GPU       → rotary embeddings etc. (small)
-│   │
-│   └─ _preload_all_layers()         → load all layers into RAM dict
-│       or _start_window_cache()     → sliding window with background thread
-│
-└─ model.generate(input_ids, max_new_tokens=N)
-    │
-    └─ forward() called once per token
-        │
-        ├─ _reset_model_to_meta()    → ensure clean parameter state
-        │
-        └─ for each layer:
-            ├─ _load_layer_to_cpu()  → from RAM cache, window, or disk
-            ├─ _move_layer_to_device()  → CPU → GPU via set_module_tensor_to_device
-            ├─ run layer (embed / transformer / norm / lm_head)
-            ├─ layer.to("meta")      → free GPU memory
-            └─ clean_gpu_memory()    → torch.cuda.empty_cache()
+```mermaid
+flowchart TD
+    A["<b>AutoModel.from_pretrained</b>('model_id')"] --> B[Detect architecture from config]
+    B --> C[Instantiate <b>ChiquitoModel</b>]
+
+    C -->|"1st: split"| D[<b>find_or_create_split</b>]
+    D --> D1[<b>resolve_model_path</b><br><i>download or locate local model</i>]
+    D1 --> D2[<b>split_and_save_layers</b><br><i>one .safetensors file per layer</i>]
+
+    C -->|"2nd: init"| E[<b>_init_model</b>]
+    E --> E1["<b>init_empty_weights</b><br><i>model on meta device (0 bytes)</i>"]
+    E1 --> E2[<b>AutoModelForCausalLM.from_config</b>]
+    E2 --> E3[Move buffers to GPU<br><i>rotary embeddings, etc.</i>]
+
+    C -->|"3rd: preload"| F{preload_to_ram?}
+    F -->|True| F1[<b>_preload_all_layers</b><br><i>all layers into RAM dict</i>]
+    F -->|int N| F2[<b>_start_window_cache</b><br><i>sliding window + background thread</i>]
+    F -->|False| F3[No preload<br><i>disk on each call</i>]
+
+    C -->|"4th: generate"| G["<b>model.generate</b>(input_ids, max_new_tokens=N)"]
+    G --> H["<b>forward</b>() — called once per token"]
+
+    H --> I[<b>_reset_model_to_meta</b><br><i>clean parameter state</i>]
+    I --> J[For each layer]
+
+    J --> K[<b>_load_layer_to_cpu</b><br><i>from RAM, window, or disk</i>]
+    K --> L[<b>_move_layer_to_device</b><br><i>CPU → GPU</i>]
+    L --> M{Layer type?}
+
+    M -->|embed| N1[Embedding + rotary pos emb]
+    M -->|transformer| N2[Self-attention + FFN<br><i>with KV cache</i>]
+    M -->|norm| N3[RMSNorm]
+    M -->|lm_head| N4[Linear → logits]
+
+    N1 --> O["<b>set_module_tensor_to_device</b>(meta)<br><i>free GPU memory</i>"]
+    N2 --> O
+    N3 --> O
+    N4 --> O
+
+    O --> P[<b>clean_gpu_memory</b>]
+    P --> J
+
+    style A fill:#4a6fa5,color:#fff
+    style G fill:#4a6fa5,color:#fff
+    style F fill:#e8a838,color:#000
+    style M fill:#e8a838,color:#000
+    style O fill:#c0392b,color:#fff
+    style K fill:#27ae60,color:#fff
+    style L fill:#27ae60,color:#fff
 ```
 
 ## The meta device
