@@ -16,6 +16,7 @@ from transformers import (
     GenerationMixin,
 )
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from transformers.cache_utils import DynamicCache
 from accelerate import init_empty_weights
 from accelerate.utils.modeling import set_module_tensor_to_device
 
@@ -347,14 +348,18 @@ class ChiquitoModel(GenerationMixin):
         attention_mask: torch.Tensor,
         position_ids: torch.Tensor,
         position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        past_key_values: DynamicCache | None = None,
+        use_cache: bool = False,
     ) -> torch.Tensor:
         kwargs: dict = {
             "attention_mask": attention_mask,
             "position_ids": position_ids,
-            "use_cache": False,
+            "use_cache": use_cache,
         }
         if position_embeddings is not None:
             kwargs["position_embeddings"] = position_embeddings
+        if past_key_values is not None:
+            kwargs["past_key_values"] = past_key_values
         out = layer(hidden_states, **kwargs)
         return out[0] if isinstance(out, tuple) else out
 
@@ -372,15 +377,28 @@ class ChiquitoModel(GenerationMixin):
     def prepare_inputs_for_generation(
         self, input_ids, attention_mask=None, **kwargs
     ):
+        past_key_values = kwargs.get("past_key_values")
+
+        if past_key_values is not None:
+            past_len = past_key_values.get_seq_length()
+            if input_ids.shape[1] > past_len:
+                input_ids = input_ids[:, past_len:]
+            else:
+                input_ids = input_ids[:, -1:]
+
         position_ids = None
         if attention_mask is not None:
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values is not None:
+                position_ids = position_ids[:, -input_ids.shape[1]:]
 
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "position_ids": position_ids,
+            "past_key_values": past_key_values,
+            "use_cache": True,
         }
 
     def __call__(self, *args, **kwargs):
@@ -412,20 +430,31 @@ class ChiquitoModel(GenerationMixin):
         input_ids = input_ids.to(self._device)
         seq_len = input_ids.shape[1]
 
-        # Causal attention mask: (1, 1, S, S)
-        causal_mask = torch.ones(seq_len, seq_len, device=self._device)
-        causal_mask = causal_mask.triu(diagonal=1)[None, None, ...] == 0
-        causal_mask = causal_mask.to(self._device)
+        # KV cache setup
+        if past_key_values is None:
+            past_key_values = DynamicCache()
+        past_len = past_key_values.get_seq_length()
+        is_prefill = past_len == 0
+        total_len = past_len + seq_len
+
+        # Causal attention mask spanning cached + new tokens
+        if is_prefill:
+            causal_mask = torch.ones(seq_len, seq_len, device=self._device)
+            causal_mask = causal_mask.triu(diagonal=1)[None, None, ...] == 0
+        else:
+            # Decode: new token(s) attend to all previous + themselves
+            causal_mask = torch.ones(1, 1, seq_len, total_len, dtype=torch.bool, device=self._device)
 
         if position_ids is None:
-            position_ids = torch.arange(seq_len, dtype=torch.long, device=self._device)[None, :]
+            position_ids = torch.arange(
+                past_len, total_len, dtype=torch.long, device=self._device
+            )[None, :]
 
         hidden_states = None
         position_embeddings = None
         names = self.LAYER_NAMES
 
         # Use ThreadPoolExecutor prefetch only when NOT using sliding window
-        # (the window cache has its own background loader)
         use_executor = self._prefetch and self._window_cache is None
 
         with torch.inference_mode():
@@ -439,6 +468,7 @@ class ChiquitoModel(GenerationMixin):
                 enumerate(zip(self.layer_names, self.layers)),
                 total=len(self.layers),
                 desc=f"Running layers ({self._device})",
+                disable=False,
             ):
                 # Load weights
                 if executor and future:
@@ -466,12 +496,14 @@ class ChiquitoModel(GenerationMixin):
                     hidden_states = self._run_transformer_layer(
                         layer,
                         hidden_states,
-                        attention_mask=causal_mask[:, :, :seq_len, :seq_len],
+                        attention_mask=causal_mask,
                         position_ids=position_ids,
                         position_embeddings=position_embeddings,
+                        past_key_values=past_key_values,
+                        use_cache=True,
                     )
 
-                # Free GPU memory
+                # Free GPU memory (weights only, not KV cache)
                 if self.hf_quantizer is not None:
                     for param_name in moved:
                         set_module_tensor_to_device(self.model, param_name, "meta")
@@ -490,4 +522,4 @@ class ChiquitoModel(GenerationMixin):
                 self._window_cache.stop()
 
         logits = hidden_states
-        return CausalLMOutputWithPast(logits=logits)
+        return CausalLMOutputWithPast(logits=logits, past_key_values=past_key_values)
