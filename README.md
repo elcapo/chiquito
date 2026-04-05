@@ -129,6 +129,12 @@ uv run ruff check --fix src/
 uv run ruff format src/
 ```
 
+Run tests:
+
+```bash
+uv run pytest
+```
+
 Run type checking:
 
 ```bash
