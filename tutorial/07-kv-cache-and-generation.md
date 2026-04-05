@@ -42,7 +42,7 @@ This reduces the attention cost from quadratic to linear:
 
 HuggingFace provides `DynamicCache`, a container that stores K and V tensors for each layer. Each layer writes to its own index.
 
-Chiquito creates the cache at the start of `forward()` if none exists ([`model.py:444-448`](../src/chiquito/model.py#L444-L448)):
+Chiquito creates the cache at the start of `forward()` if none exists ([`model.py:444-448`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L444-L448)):
 
 ```python
 if past_key_values is None:
@@ -62,7 +62,7 @@ Note how `is_prefill` drives the attention mask shape:
 
 ## GenerationMixin: the autoregressive loop
 
-Instead of writing our own generation loop, Chiquito inherits from HuggingFace's `GenerationMixin` ([`model.py:97`](../src/chiquito/model.py#L97)):
+Instead of writing our own generation loop, Chiquito inherits from HuggingFace's `GenerationMixin` ([`model.py:97`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L97)):
 
 ```python
 class ChiquitoModel(GenerationMixin):
@@ -84,7 +84,7 @@ def can_generate(self) -> bool:
     return True
 ```
 
-([`model.py:378-379`](../src/chiquito/model.py#L378-L379))
+([`model.py:378-379`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L378-L379))
 
 ### 2. `prepare_inputs_for_generation()` — prepare each step's inputs
 
@@ -117,7 +117,7 @@ def prepare_inputs_for_generation(self, input_ids, attention_mask=None, **kwargs
     }
 ```
 
-([`model.py:381-406`](../src/chiquito/model.py#L381-L406))
+([`model.py:381-406`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L381-L406))
 
 On the first call, `past_key_values` is None, so `input_ids` is the full prompt. On subsequent calls, we slice to only the new token(s). Position IDs are computed from the attention mask using `cumsum`.
 
@@ -127,7 +127,7 @@ This is what we built in [Unit 06](06-forward-pass.md). `GenerationMixin` calls 
 
 ### 4. `__call__` — make the model callable
 
-`GenerationMixin` calls the model as a function, so we need `__call__` to route to `forward()` ([`model.py:408-409`](../src/chiquito/model.py#L408-L409)):
+`GenerationMixin` calls the model as a function, so we need `__call__` to route to `forward()` ([`model.py:408-409`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L408-L409)):
 
 ```python
 def __call__(self, *args, **kwargs):

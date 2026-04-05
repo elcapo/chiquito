@@ -2,7 +2,7 @@
 
 Layer-by-layer inference creates and destroys large tensors constantly. Without explicit memory management, GPU memory accumulates leaked allocations, Python's heap grows unboundedly, and CPU-to-GPU transfers are slower than they need to be.
 
-This unit covers the memory utilities in [`utils.py`](../src/chiquito/utils.py) and the pinned memory technique used for fast preloading.
+This unit covers the memory utilities in [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) and the pinned memory technique used for fast preloading.
 
 ## The three levels of memory cleanup
 
@@ -18,9 +18,9 @@ def clean_gpu_memory():
         torch.cuda.empty_cache()
 ```
 
-([`utils.py:20-22`](../src/chiquito/utils.py#L20-L22))
+([`utils.py:20-22`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py#L20-L22))
 
-This is **called after every layer** in the forward pass ([`model.py:519`](../src/chiquito/model.py#L519)) because it is cheap (microseconds) and essential to prevent GPU memory from growing.
+This is **called after every layer** in the forward pass ([`model.py:519`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L519)) because it is cheap (microseconds) and essential to prevent GPU memory from growing.
 
 ### Level 2: `gc.collect()` — Python garbage collection
 
@@ -50,7 +50,7 @@ This is Linux-specific (it uses glibc directly) and is wrapped in a try/except f
 
 ### The combined cleanup function
 
-[`utils.py:10-17`](../src/chiquito/utils.py#L10-L17) combines all three:
+[`utils.py:10-17`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py#L10-L17) combines all three:
 
 ```python
 def clean_memory():
@@ -69,8 +69,8 @@ This is the "heavy" cleanup — used during model initialization, after splittin
 
 | Function | Cost | When used | Where |
 |---------|------|-----------|-------|
-| `clean_gpu_memory()` | Microseconds | After every layer in forward pass | [`model.py:519`](../src/chiquito/model.py#L519) |
-| `clean_memory()` | Milliseconds | During init, after splitting, quantized model reset | [`model.py:430`](../src/chiquito/model.py#L430), [`splitter.py:67`](../src/chiquito/splitter.py#L67) |
+| `clean_gpu_memory()` | Microseconds | After every layer in forward pass | [`model.py:519`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L519) |
+| `clean_memory()` | Milliseconds | During init, after splitting, quantized model reset | [`model.py:430`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L430), [`splitter.py:67`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L67) |
 
 ## Pinned memory: faster CPU-to-GPU transfers
 
@@ -89,7 +89,7 @@ PyTorch makes this easy:
 tensor = tensor.pin_memory()  # page-lock this tensor in RAM
 ```
 
-Chiquito pins all tensors when preloading to RAM ([`model.py:294-301`](../src/chiquito/model.py#L294-L301)):
+Chiquito pins all tensors when preloading to RAM ([`model.py:294-301`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L294-L301)):
 
 ```python
 def _preload_all_layers(self):

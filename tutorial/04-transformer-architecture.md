@@ -58,7 +58,7 @@ HuggingFace models use a consistent naming scheme for their modules. For Llama-s
 
 These names are what appear as prefixes in the `state_dict()`. For example, `model.layers.5.self_attn.q_proj.weight` is the query projection weight in transformer layer 5.
 
-Chiquito encodes these names in a class variable ([`model.py:99-104`](../src/chiquito/model.py#L99-L104)):
+Chiquito encodes these names in a class variable ([`model.py:99-104`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L99-L104)):
 
 ```python
 class ChiquitoModel(GenerationMixin):
@@ -114,7 +114,7 @@ for attr in "model.layers".split("."):
 # module is now the nn.ModuleList containing all transformer layers
 ```
 
-This is how Chiquito builds its layer list in [`model.py:260-292`](../src/chiquito/model.py#L260-L292). The `_build_layers()` method walks the module tree for each of the four block types and collects references:
+This is how Chiquito builds its layer list in [`model.py:260-292`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L260-L292). The `_build_layers()` method walks the module tree for each of the four block types and collects references:
 
 ```python
 def _build_layers(self):
@@ -151,7 +151,7 @@ For our purposes, the key fact is:
 - They are passed to every transformer layer as a `(cos, sin)` tuple
 - The RoPE module itself is a **buffer** (not a learned parameter), so it lives on the GPU permanently and does not need to be loaded per-layer
 
-Chiquito computes position embeddings in [`model.py:340-346`](../src/chiquito/model.py#L340-L346):
+Chiquito computes position embeddings in [`model.py:340-346`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L340-L346):
 
 ```python
 def _compute_position_embeddings(self, hidden_states, position_ids):

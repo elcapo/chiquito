@@ -1,6 +1,6 @@
 # Splitting Checkpoints into Per-Layer Files
 
-Now we start building. The first practical piece of Chiquito is the **splitter**: code that takes a HuggingFace model checkpoint and produces one safetensors file per layer. This is implemented in [`splitter.py`](../src/chiquito/splitter.py) (~125 lines).
+Now we start building. The first practical piece of Chiquito is the **splitter**: code that takes a HuggingFace model checkpoint and produces one safetensors file per layer. This is implemented in [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) (~125 lines).
 
 ## Why we need to split
 
@@ -34,7 +34,7 @@ Each per-layer file contains only the parameters whose names start with that lay
 
 ## File paths and completion markers
 
-The first thing we need are helper functions for computing file paths ([`splitter.py:13-22`](../src/chiquito/splitter.py#L13-L22)):
+The first thing we need are helper functions for computing file paths ([`splitter.py:13-22`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L13-L22)):
 
 ```python
 def layer_file_path(split_dir: Path, layer_name: str) -> Path:
@@ -52,7 +52,7 @@ The `.done` marker is a crash-safety mechanism. If the process is interrupted wh
 
 ## The splitting algorithm
 
-The core function is `split_and_save_layers()` ([`splitter.py:25-111`](../src/chiquito/splitter.py#L25-L111)). It handles two cases:
+The core function is `split_and_save_layers()` ([`splitter.py:25-111`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L25-L111)). It handles two cases:
 
 ### Case 1: Single-file model
 
@@ -80,7 +80,7 @@ You might wonder: if we have to load the entire file to split it, what's the poi
 
 ### Case 2: Multi-shard model
 
-For sharded models, we work incrementally to minimize RAM usage ([`splitter.py:70-111`](../src/chiquito/splitter.py#L70-L111)):
+For sharded models, we work incrementally to minimize RAM usage ([`splitter.py:70-111`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L70-L111)):
 
 ```python
 loaded_shards: set[str] = set()
@@ -119,7 +119,7 @@ for layer_name in tqdm(layer_names, desc="Splitting layers"):
 
 The key optimization is that we **accumulate shard data in `state_dict`** and delete extracted parameters as we go. Since layers are ordered and shards tend to contain contiguous layers, we naturally work through the shards front to back without holding the entire model in memory.
 
-Note the lazy shard downloading ([`splitter.py:89-95`](../src/chiquito/splitter.py#L89-L95)): if a shard file does not exist locally (because the user only downloaded the index), we download just that shard on demand:
+Note the lazy shard downloading ([`splitter.py:89-95`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L89-L95)): if a shard file does not exist locally (because the user only downloaded the index), we download just that shard on demand:
 
 ```python
 if not shard_path.exists() and repo_id:
@@ -131,7 +131,7 @@ if not shard_path.exists() and repo_id:
 
 ## Early exit
 
-Before doing any work, the function checks if all layers have already been split ([`splitter.py:33-36`](../src/chiquito/splitter.py#L33-L36)):
+Before doing any work, the function checks if all layers have already been split ([`splitter.py:33-36`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L33-L36)):
 
 ```python
 if split_dir.exists() and all(is_layer_split(split_dir, name)
@@ -144,7 +144,7 @@ This means subsequent runs of Chiquito on the same model skip the splitting step
 
 ## The entry point: find_or_create_split
 
-The function called by `ChiquitoModel.__init__` is `find_or_create_split()` ([`splitter.py:114-126`](../src/chiquito/splitter.py#L114-L126)):
+The function called by `ChiquitoModel.__init__` is `find_or_create_split()` ([`splitter.py:114-126`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L114-L126)):
 
 ```python
 def find_or_create_split(model_id_or_path, layer_names, hf_token=None):
@@ -158,7 +158,7 @@ def find_or_create_split(model_id_or_path, layer_names, hf_token=None):
 
 It resolves the model path (downloading from HuggingFace if needed), determines the `repo_id` for lazy shard downloading, runs the split, and returns both the model path and the split directory.
 
-This is called at [`model.py:141-143`](../src/chiquito/model.py#L141-L143):
+This is called at [`model.py:141-143`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L141-L143):
 
 ```python
 self._model_path, self._split_dir = find_or_create_split(

@@ -1,6 +1,6 @@
 # The Layer-by-Layer Forward Pass
 
-This is the heart of Chiquito: the `forward()` method that iterates through layers, loading each one's weights to the GPU, running it, and freeing the memory. This unit builds the core loop implemented in [`model.py:413-531`](../src/chiquito/model.py#L413-L531).
+This is the heart of Chiquito: the `forward()` method that iterates through layers, loading each one's weights to the GPU, running it, and freeing the memory. This unit builds the core loop implemented in [`model.py:413-531`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L413-L531).
 
 ## The load-execute-free cycle
 
@@ -26,15 +26,15 @@ torch.cuda.empty_cache()
 
 In Chiquito, steps 1, 2, and 4 are encapsulated in helper methods:
 
-- Step 1 is `_load_layer_to_cpu()` ([`model.py:311-316`](../src/chiquito/model.py#L311-L316)).
-- Step 2 is `_move_layer_to_device()` ([`model.py:318-328`](../src/chiquito/model.py#L318-L328)).
-- Step 4 happens inline in the forward loop ([`model.py:517-519`](../src/chiquito/model.py#L517-L519)).
+- Step 1 is `_load_layer_to_cpu()` ([`model.py:311-316`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L311-L316)).
+- Step 2 is `_move_layer_to_device()` ([`model.py:318-328`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L318-L328)).
+- Step 4 happens inline in the forward loop ([`model.py:517-519`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L517-L519)).
 
 ## Resetting the model before each forward call
 
 Remember that `forward()` is called once per generated token and each call iterates through all layers. Before starting, we need a clean model: all parameters back on meta.
 
-For non-quantized models, this is a lightweight operation ([`model.py:251-258`](../src/chiquito/model.py#L251-L258)):
+For non-quantized models, this is a lightweight operation ([`model.py:251-258`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L251-L258)):
 
 ```python
 def _reset_model_to_meta(self):
@@ -50,7 +50,7 @@ def _reset_model_to_meta(self):
 
 Notice that **buffers** (like RoPE frequencies) are moved back to the GPU. They are small and needed by every layer, so they live on the GPU permanently.
 
-The reset happens at the start of `forward()` ([`model.py:426-434`](../src/chiquito/model.py#L426-L434)):
+The reset happens at the start of `forward()` ([`model.py:426-434`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L426-L434)):
 
 ```python
 def forward(self, input_ids, ...):
@@ -81,7 +81,7 @@ Token:  0  1  2  3  4
     4 [ T  T  T  T  T ]   token 4 sees tokens 0-4
 ```
 
-In code ([`model.py:451-453`](../src/chiquito/model.py#L451-L453)):
+In code ([`model.py:451-453`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L451-L453)):
 
 ```python
 if is_prefill:
@@ -120,7 +120,7 @@ These position IDs are used by the RoPE module to compute position embeddings (s
 
 ## The forward loop
 
-With all the setup done, the core loop iterates through layers ([`model.py:477-528`](../src/chiquito/model.py#L477-L528)):
+With all the setup done, the core loop iterates through layers ([`model.py:477-528`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L477-L528)):
 
 ```python
 with torch.inference_mode():
@@ -161,7 +161,7 @@ The layer dispatch is straightforward: check the layer name against the four kno
 
 ## Layer execution methods
 
-The transformer layer, norm, and LM head are called through dedicated methods ([`model.py:348-374`](../src/chiquito/model.py#L348-L374)) that serve as override points for different architectures:
+The transformer layer, norm, and LM head are called through dedicated methods ([`model.py:348-374`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L348-L374)) that serve as override points for different architectures:
 
 ```python
 def _run_transformer_layer(self, layer, hidden_states, attention_mask,
@@ -188,7 +188,7 @@ def _run_lm_head(self, layer, hidden_states):
 
 ## The return value
 
-After all layers have run, the final hidden states are the logits. We return them wrapped in a `CausalLMOutputWithPast` object ([`model.py:530-531`](../src/chiquito/model.py#L530-L531)):
+After all layers have run, the final hidden states are the logits. We return them wrapped in a `CausalLMOutputWithPast` object ([`model.py:530-531`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L530-L531)):
 
 ```python
 logits = hidden_states

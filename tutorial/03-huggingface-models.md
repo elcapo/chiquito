@@ -18,7 +18,7 @@ print(config.architectures)       # ["LlamaForCausalLM"]
 
 This is lightweight — it downloads only `config.json`, not the weights. Chiquito uses the config at two critical points:
 
-1. **Counting layers** to build the layer name list ([`model.py:167-189`](../src/chiquito/model.py#L167-L189)):
+1. **Counting layers** to build the layer name list ([`model.py:167-189`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L167-L189)):
    ```python
    def _build_layer_name_list_from_config(self, model_id_or_path, hf_token):
        config = AutoConfig.from_pretrained(model_id_or_path, ...)
@@ -31,7 +31,7 @@ This is lightweight — it downloads only `config.json`, not the weights. Chiqui
        n_layers = len(module)
    ```
 
-2. **Detecting architecture** in the AutoModel factory ([`auto_model.py:34`](../src/chiquito/auto_model.py#L34)):
+2. **Detecting architecture** in the AutoModel factory ([`auto_model.py:34`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py#L34)):
    ```python
    arch = config.architectures[0]  # e.g., "LlamaForCausalLM"
    ```
@@ -54,7 +54,7 @@ text = tokenizer.decode(tokens["input_ids"][0])
 print(text)                  # "Hello, world!"
 ```
 
-Chiquito loads the tokenizer once during initialization ([`model.py:150-152`](../src/chiquito/model.py#L150-L152)) and exposes it as `model.tokenizer` for the user to encode prompts and decode outputs.
+Chiquito loads the tokenizer once during initialization ([`model.py:150-152`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L150-L152)) and exposes it as `model.tokenizer` for the user to encode prompts and decode outputs.
 
 ## The safetensors format
 
@@ -71,7 +71,7 @@ state_dict = load_file("model.safetensors", device="cpu")
 save_file(state_dict, "output.safetensors")
 ```
 
-Chiquito wraps these in small utility functions ([`utils.py:25-30`](../src/chiquito/utils.py#L25-L30)):
+Chiquito wraps these in small utility functions ([`utils.py:25-30`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py#L25-L30)):
 
 ```python
 def load_safetensors(path: Path) -> dict[str, torch.Tensor]:
@@ -102,7 +102,7 @@ When a model is sharded, there is an index file called `model.safetensors.index.
 
 This weight map is what makes checkpoint splitting possible: we can look up which shard contains a given layer's parameters without loading everything.
 
-Chiquito parses this map in [`splitter.py:44-53`](../src/chiquito/splitter.py#L44-L53):
+Chiquito parses this map in [`splitter.py:44-53`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L44-L53):
 
 ```python
 index_path = model_path / "model.safetensors.index.json"
@@ -133,7 +133,7 @@ cache_path = huggingface_hub.snapshot_download(
 
 This returns the local path where the files were cached. Subsequent calls with the same model ID return the cached path without re-downloading.
 
-Chiquito's `resolve_model_path()` function ([`utils.py:33-45`](../src/chiquito/utils.py#L33-L45)) wraps this logic: if the path is a local directory with model files, use it directly; otherwise, download from the Hub:
+Chiquito's `resolve_model_path()` function ([`utils.py:33-45`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py#L33-L45)) wraps this logic: if the path is a local directory with model files, use it directly; otherwise, download from the Hub:
 
 ```python
 def resolve_model_path(model_id_or_path: str, hf_token=None) -> Path:

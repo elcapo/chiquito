@@ -8,17 +8,17 @@ The entire library is ~745 lines across 5 files:
 
 | File | Lines | Responsibility |
 |------|-------|---------------|
-| [`__init__.py`](../src/chiquito/__init__.py) | 4 | Package exports |
-| [`auto_model.py`](../src/chiquito/auto_model.py) | 41 | Factory + registry (Unit 11) |
-| [`model.py`](../src/chiquito/model.py) | 532 | Core engine (Units 06-10) |
-| [`splitter.py`](../src/chiquito/splitter.py) | 126 | Checkpoint splitting (Unit 05) |
-| [`utils.py`](../src/chiquito/utils.py) | 46 | Memory + I/O helpers (Units 03, 08) |
+| [`__init__.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/__init__.py) | 4 | Package exports |
+| [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) | 41 | Factory + registry (Unit 11) |
+| [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py) | 532 | Core engine (Units 06-10) |
+| [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) | 126 | Checkpoint splitting (Unit 05) |
+| [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) | 46 | Memory + I/O helpers (Units 03, 08) |
 
 ## The initialization sequence
 
 When the user calls `AutoModel.from_pretrained("some-model")`, here is what happens:
 
-### 1. Architecture detection ([`auto_model.py:25-40`](../src/chiquito/auto_model.py#L25-L40))
+### 1. Architecture detection ([`auto_model.py:25-40`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py#L25-L40))
 
 ```
 AutoModel.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
@@ -27,7 +27,7 @@ AutoModel.from_pretrained("Qwen/Qwen2.5-Coder-7B-Instruct")
   └─ Fall back to ChiquitoModel("Qwen/Qwen2.5-Coder-7B-Instruct", ...)
 ```
 
-### 2. Constructor ([`model.py:106-165`](../src/chiquito/model.py#L106-L165))
+### 2. Constructor ([`model.py:106-165`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L106-L165))
 
 ```
 ChiquitoModel.__init__

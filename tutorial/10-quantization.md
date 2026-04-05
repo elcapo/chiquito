@@ -34,7 +34,7 @@ Both formats are provided by bitsandbytes and integrated into HuggingFace transf
 
 ### Step 1: Configure bitsandbytes
 
-During model initialization, `_init_model()` creates a `BitsAndBytesConfig` and applies it via `AutoHfQuantizer` ([`model.py:211-237`](../src/chiquito/model.py#L211-L237)):
+During model initialization, `_init_model()` creates a `BitsAndBytesConfig` and applies it via `AutoHfQuantizer` ([`model.py:211-237`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L211-L237)):
 
 ```python
 if self._quantization is not None:
@@ -65,7 +65,7 @@ These are still on the meta device at this point — no quantization has happene
 
 ### Step 2: Quantize on-the-fly during weight loading
 
-The quantization happens inside `set_module_tensor_to_device()` (from the `accelerate` library), which Chiquito calls in `_move_layer_to_device()` ([`model.py:318-328`](../src/chiquito/model.py#L318-L328)):
+The quantization happens inside `set_module_tensor_to_device()` (from the `accelerate` library), which Chiquito calls in `_move_layer_to_device()` ([`model.py:318-328`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L318-L328)):
 
 ```python
 def _move_layer_to_device(self, state_dict):
@@ -88,7 +88,7 @@ During the forward pass, the bitsandbytes linear layers use optimized CUDA kerne
 
 There is one important complication. Bitsandbytes modules maintain internal **quantization state** — absmax values, codebooks, and other metadata computed during quantization. This state cannot survive a round-trip to the meta device. If we move a `Linear4bit` module to meta and back, the quantization state is lost and the module breaks.
 
-This is why quantized models need a full `del model` + `_init_model()` reset instead of the lightweight `_reset_model_to_meta()` ([`model.py:427-434`](../src/chiquito/model.py#L427-L434)):
+This is why quantized models need a full `del model` + `_init_model()` reset instead of the lightweight `_reset_model_to_meta()` ([`model.py:427-434`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L427-L434)):
 
 ```python
 if self.hf_quantizer is not None:
@@ -105,7 +105,7 @@ This is more expensive (creates a new model object from scratch), but it is the 
 
 ## Pre-quantized models
 
-Some HuggingFace models are distributed already quantized (the weights on disk are already in 4-bit or 8-bit format). Chiquito detects this via `config.quantization_config` and handles it similarly ([`model.py:230-237`](../src/chiquito/model.py#L230-L237)):
+Some HuggingFace models are distributed already quantized (the weights on disk are already in 4-bit or 8-bit format). Chiquito detects this via `config.quantization_config` and handles it similarly ([`model.py:230-237`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L230-L237)):
 
 ```python
 elif quantization_config is not None:

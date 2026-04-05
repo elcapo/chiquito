@@ -2,11 +2,11 @@
 
 Everything we have built so far assumes Llama-style naming: `model.embed_tokens`, `model.layers.N`, `model.norm`, `lm_head`. But not all models follow this convention. ChatGLM uses `transformer.encoder.layers`, Phi uses `model.layers` but with a different position embedding setup, and so on.
 
-Chiquito handles this with two mechanisms: a **factory pattern with registry** for architecture detection, and **override points** for customizing layer execution. The factory is in [`auto_model.py`](../src/chiquito/auto_model.py) (~40 lines), and the override points are in [`model.py`](../src/chiquito/model.py).
+Chiquito handles this with two mechanisms: a **factory pattern with registry** for architecture detection, and **override points** for customizing layer execution. The factory is in [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) (~40 lines), and the override points are in [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py).
 
 ## The LAYER_NAMES dict
 
-Each `ChiquitoModel` subclass defines a class variable mapping logical block names to the actual module paths used by that architecture ([`model.py:99-104`](../src/chiquito/model.py#L99-L104)):
+Each `ChiquitoModel` subclass defines a class variable mapping logical block names to the actual module paths used by that architecture ([`model.py:99-104`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L99-L104)):
 
 ```python
 class ChiquitoModel(GenerationMixin):
@@ -34,7 +34,7 @@ The entire initialization and forward pass logic uses these names through `self.
 
 ## The AutoModel factory
 
-The `AutoModel` class provides a `from_pretrained()` method that automatically selects the right `ChiquitoModel` subclass ([`auto_model.py:11-41`](../src/chiquito/auto_model.py#L11-L41)):
+The `AutoModel` class provides a `from_pretrained()` method that automatically selects the right `ChiquitoModel` subclass ([`auto_model.py:11-41`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py#L11-L41)):
 
 ```python
 class AutoModel:
@@ -94,7 +94,7 @@ Sometimes different `LAYER_NAMES` are not enough — some architectures have dif
 
 ### `_compute_position_embeddings`
 
-Computes rotary position embeddings after the embedding layer ([`model.py:340-346`](../src/chiquito/model.py#L340-L346)):
+Computes rotary position embeddings after the embedding layer ([`model.py:340-346`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L340-L346)):
 
 ```python
 def _compute_position_embeddings(self, hidden_states, position_ids):
@@ -108,7 +108,7 @@ Override this if the model's position embedding module is at a different path or
 
 ### `_run_transformer_layer`
 
-Calls a single transformer layer ([`model.py:348-368`](../src/chiquito/model.py#L348-L368)):
+Calls a single transformer layer ([`model.py:348-368`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L348-L368)):
 
 ```python
 def _run_transformer_layer(self, layer, hidden_states, attention_mask,
@@ -131,7 +131,7 @@ Override this if the model's transformer layers expect different keyword argumen
 
 ### `_run_norm` and `_run_lm_head`
 
-Simple wrappers ([`model.py:370-374`](../src/chiquito/model.py#L370-L374)):
+Simple wrappers ([`model.py:370-374`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L370-L374)):
 
 ```python
 def _run_norm(self, layer, hidden_states):
@@ -192,7 +192,7 @@ Many modern architectures follow the Llama naming convention: Llama itself, Mist
 
 | Mechanism | Purpose | Where |
 |-----------|---------|-------|
-| `LAYER_NAMES` dict | Map logical blocks to module paths | [`model.py:99-104`](../src/chiquito/model.py#L99-L104) |
-| `AutoModel._REGISTRY` | Map architecture names to classes | [`auto_model.py:12`](../src/chiquito/auto_model.py#L12) |
-| `AutoModel.from_pretrained()` | Auto-detect architecture and instantiate | [`auto_model.py:25-40`](../src/chiquito/auto_model.py#L25-L40) |
-| Override methods | Customize layer execution | [`model.py:340-374`](../src/chiquito/model.py#L340-L374) |
+| `LAYER_NAMES` dict | Map logical blocks to module paths | [`model.py:99-104`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L99-L104) |
+| `AutoModel._REGISTRY` | Map architecture names to classes | [`auto_model.py:12`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py#L12) |
+| `AutoModel.from_pretrained()` | Auto-detect architecture and instantiate | [`auto_model.py:25-40`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py#L25-L40) |
+| Override methods | Customize layer execution | [`model.py:340-374`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L340-L374) |

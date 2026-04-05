@@ -86,7 +86,7 @@ This gives us a fully structured model object — with all layers, sub-modules, 
 
 This is exactly what Chiquito does at initialization: it creates the full model architecture on the meta device, then loads real weights into individual layers one at a time during the forward pass.
 
-You can see this in [`model.py:196-208`](../src/chiquito/model.py#L196-L208), where `_init_model()` creates the model on meta:
+You can see this in [`model.py:196-208`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L196-L208), where `_init_model()` creates the model on meta:
 
 ```python
 def _init_model(self):
@@ -129,7 +129,7 @@ This is the fundamental operation for layer-by-layer inference:
 3. Run the layer
 4. Call `set_module_tensor_to_device` with device `"meta"` to free the GPU memory
 
-You can see steps 2 and 4 in [`model.py:318-328`](../src/chiquito/model.py#L318-L328) and [`model.py:517-518`](../src/chiquito/model.py#L517-L518):
+You can see steps 2 and 4 in [`model.py:318-328`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L318-L328) and [`model.py:517-518`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L517-L518):
 
 ```python
 # Step 2: move weights to GPU
@@ -156,7 +156,7 @@ with torch.inference_mode():
     output = model(input)
 ```
 
-The entire forward pass in Chiquito runs inside this context manager ([`model.py:470`](../src/chiquito/model.py#L470)).
+The entire forward pass in Chiquito runs inside this context manager ([`model.py:470`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L470)).
 
 ## Summary
 
