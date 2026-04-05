@@ -19,3 +19,36 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chiquito"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.0",
+    "ruff>=0.15.9",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["chiquito"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["chiquito"]
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+no_site_packages = true

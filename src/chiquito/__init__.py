@@ -1,4 +1,4 @@
-from .model import ChiquitoModel
 from .auto_model import AutoModel
+from .model import ChiquitoModel
 
-__all__ = ["ChiquitoModel", "AutoModel"]
+__all__ = ["AutoModel", "ChiquitoModel"]

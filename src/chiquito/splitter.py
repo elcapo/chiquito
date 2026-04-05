@@ -1,11 +1,10 @@
 import json
 from pathlib import Path
 
-from tqdm import tqdm
 from safetensors.torch import load_file
+from tqdm import tqdm
 
-from .utils import save_safetensors, clean_memory, resolve_model_path
-
+from .utils import clean_memory, resolve_model_path, save_safetensors
 
 SPLIT_DIR_NAME = "chiquito_split"
 
@@ -19,7 +18,10 @@ def done_marker_path(split_dir: Path, layer_name: str) -> Path:
 
 
 def is_layer_split(split_dir: Path, layer_name: str) -> bool:
-    return layer_file_path(split_dir, layer_name).exists() and done_marker_path(split_dir, layer_name).exists()
+    return (
+        layer_file_path(split_dir, layer_name).exists()
+        and done_marker_path(split_dir, layer_name).exists()
+    )
 
 
 def split_and_save_layers(
@@ -31,7 +33,9 @@ def split_and_save_layers(
     split_dir = model_path / SPLIT_DIR_NAME
 
     # Check if all layers already split
-    if split_dir.exists() and all(is_layer_split(split_dir, name) for name in layer_names):
+    if split_dir.exists() and all(
+        is_layer_split(split_dir, name) for name in layer_names
+    ):
         print(f"All layers already split in {split_dir}")
         return split_dir
 
@@ -52,6 +56,8 @@ def split_and_save_layers(
             f"No model.safetensors.index.json or model.safetensors found in {model_path}"
         )
 
+    state_dict: dict = {}
+
     if weight_map is None:
         # Single safetensors file: load everything, split, save
         state_dict = load_file(str(single_file), device="cpu")
@@ -70,7 +76,7 @@ def split_and_save_layers(
     # Multi-shard model: load shards incrementally
     # Figure out which shards exist and their numbering
     loaded_shards: set[str] = set()
-    state_dict: dict = {}
+    state_dict = {}
 
     for layer_name in tqdm(layer_names, desc="Splitting layers"):
         if is_layer_split(split_dir, layer_name):
@@ -88,6 +94,7 @@ def split_and_save_layers(
                 shard_path = model_path / shard
                 if not shard_path.exists() and repo_id:
                     import huggingface_hub
+
                     huggingface_hub.snapshot_download(
                         repo_id,
                         allow_patterns=[shard],
@@ -121,5 +128,7 @@ def find_or_create_split(
     # Determine repo_id for lazy shard downloading
     repo_id = None if Path(model_id_or_path).is_dir() else model_id_or_path
 
-    split_dir = split_and_save_layers(model_path, layer_names, hf_token=hf_token, repo_id=repo_id)
+    split_dir = split_and_save_layers(
+        model_path, layer_names, hf_token=hf_token, repo_id=repo_id
+    )
     return model_path, split_dir

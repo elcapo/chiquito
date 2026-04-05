@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import threading
-from pathlib import Path
-from typing import Optional, Union
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import ClassVar, Any
 
 import torch
 import torch.nn as nn
+from accelerate import init_empty_weights
+from accelerate.utils.modeling import set_module_tensor_to_device
 from tqdm import tqdm
 from transformers import (
     AutoConfig,
@@ -15,13 +17,11 @@ from transformers import (
     GenerationConfig,
     GenerationMixin,
 )
-from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.cache_utils import DynamicCache
-from accelerate import init_empty_weights
-from accelerate.utils.modeling import set_module_tensor_to_device
+from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from .utils import clean_memory, clean_gpu_memory, load_safetensors
 from .splitter import find_or_create_split, layer_file_path
+from .utils import clean_gpu_memory, clean_memory, load_safetensors
 
 
 class _SlidingWindowCache:
@@ -48,9 +48,7 @@ class _SlidingWindowCache:
         initial_count = min(self._window_size, len(self._layer_names))
         for i in tqdm(range(initial_count), desc="Preloading window to RAM"):
             name = self._layer_names[i]
-            self._cache[name] = load_safetensors(
-                layer_file_path(self._split_dir, name)
-            )
+            self._cache[name] = load_safetensors(layer_file_path(self._split_dir, name))
         self._next_to_load = initial_count
         self._loader_thread = threading.Thread(
             target=self._background_loader, daemon=True
@@ -95,8 +93,7 @@ class _SlidingWindowCache:
 
 
 class ChiquitoModel(GenerationMixin):
-
-    LAYER_NAMES = {
+    LAYER_NAMES: ClassVar[dict] = {
         "embed": "model.embed_tokens",
         "layer_prefix": "model.layers",
         "norm": "model.norm",
@@ -123,7 +120,7 @@ class ChiquitoModel(GenerationMixin):
         self._ram_cache: dict[str, dict[str, torch.Tensor]] | None = None
         self._window_cache: _SlidingWindowCache | None = None
         self._window_size: int | None = None
-        self.hf_quantizer = None
+        self.hf_quantizer: Any = None
         self.main_input_name = "input_ids"
 
         # Interpret preload_to_ram
@@ -135,7 +132,9 @@ class ChiquitoModel(GenerationMixin):
             self._window_size = int(preload_to_ram)
 
         # Build layer name list before splitting
-        all_layer_names = self._build_layer_name_list_from_config(model_id_or_path, hf_token)
+        all_layer_names = self._build_layer_name_list_from_config(
+            model_id_or_path, hf_token
+        )
 
         # Split model into per-layer files
         self._model_path, self._split_dir = find_or_create_split(
@@ -184,12 +183,12 @@ class ChiquitoModel(GenerationMixin):
         names = self.LAYER_NAMES
         return (
             [names["embed"]]
-            + [f'{names["layer_prefix"]}.{i}' for i in range(n_layers)]
+            + [f"{names['layer_prefix']}.{i}" for i in range(n_layers)]
             + [names["norm"], names["lm_head"]]
         )
 
     def _init_model(self):
-        self.model = None
+        self.model: Any = None
 
         # Try sdpa attention first
         try:
@@ -222,7 +221,9 @@ class ChiquitoModel(GenerationMixin):
             elif self._quantization == "8bit":
                 bnb_config = BitsAndBytesConfig(load_in_8bit=True)
             else:
-                raise ValueError(f"Unknown quantization: {self._quantization!r}. Use '4bit' or '8bit'.")
+                raise ValueError(
+                    f"Unknown quantization: {self._quantization!r}. Use '4bit' or '8bit'."
+                )
 
             self.hf_quantizer = AutoHfQuantizer.from_config(bnb_config)
             device_map = self.hf_quantizer.update_device_map(None)
@@ -275,7 +276,7 @@ class ChiquitoModel(GenerationMixin):
             module = getattr(module, attr)
         for i, layer in enumerate(module):
             self.layers.append(layer)
-            self.layer_names.append(f'{names["layer_prefix"]}.{i}')
+            self.layer_names.append(f"{names['layer_prefix']}.{i}")
 
         # Norm
         module = self.model
@@ -303,6 +304,7 @@ class ChiquitoModel(GenerationMixin):
     def _start_window_cache(self):
         if self._window_cache is not None:
             self._window_cache.stop()
+        assert self._window_size is not None
         self._window_cache = _SlidingWindowCache(
             self.layer_names, self._split_dir, self._window_size
         )
@@ -342,7 +344,8 @@ class ChiquitoModel(GenerationMixin):
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
         rotary_emb = getattr(getattr(self.model, "model", None), "rotary_emb", None)
         if rotary_emb is not None:
-            return rotary_emb(hidden_states, position_ids=position_ids)
+            result: tuple[torch.Tensor, torch.Tensor] = rotary_emb(hidden_states, position_ids=position_ids)
+            return result
         return None
 
     def _run_transformer_layer(
@@ -370,7 +373,9 @@ class ChiquitoModel(GenerationMixin):
     def _run_norm(self, layer: nn.Module, hidden_states: torch.Tensor) -> torch.Tensor:
         return layer(hidden_states)
 
-    def _run_lm_head(self, layer: nn.Module, hidden_states: torch.Tensor) -> torch.Tensor:
+    def _run_lm_head(
+        self, layer: nn.Module, hidden_states: torch.Tensor
+    ) -> torch.Tensor:
         return layer(hidden_states).float()
 
     # --- GenerationMixin interface ---
@@ -378,9 +383,7 @@ class ChiquitoModel(GenerationMixin):
     def can_generate(self) -> bool:
         return True
 
-    def prepare_inputs_for_generation(
-        self, input_ids, attention_mask=None, **kwargs
-    ):
+    def prepare_inputs_for_generation(self, input_ids, attention_mask=None, **kwargs):
         past_key_values = kwargs.get("past_key_values")
 
         if past_key_values is not None:
@@ -395,7 +398,7 @@ class ChiquitoModel(GenerationMixin):
             position_ids = attention_mask.long().cumsum(-1) - 1
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past_key_values is not None:
-                position_ids = position_ids[:, -input_ids.shape[1]:]
+                position_ids = position_ids[:, -input_ids.shape[1] :]
 
         return {
             "input_ids": input_ids,
@@ -413,16 +416,16 @@ class ChiquitoModel(GenerationMixin):
     def forward(
         self,
         input_ids: torch.LongTensor = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
         past_key_values=None,
         inputs_embeds=None,
         labels=None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, CausalLMOutputWithPast]:
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+    ) -> tuple | CausalLMOutputWithPast:
         # Reset model to clean state
         if self.hf_quantizer is not None:
             # Quantized models need full reinit (bnb modules can't round-trip to meta)
@@ -453,7 +456,9 @@ class ChiquitoModel(GenerationMixin):
             causal_mask = causal_mask.triu(diagonal=1)[None, None, ...] == 0
         else:
             # Decode: new token(s) attend to all previous + themselves
-            causal_mask = torch.ones(1, 1, seq_len, total_len, dtype=torch.bool, device=self._device)
+            causal_mask = torch.ones(
+                1, 1, seq_len, total_len, dtype=torch.bool, device=self._device
+            )
 
         if position_ids is None:
             position_ids = torch.arange(
@@ -475,7 +480,7 @@ class ChiquitoModel(GenerationMixin):
                 future = executor.submit(self._load_layer_to_cpu, self.layer_names[0])
 
             for i, (layer_name, layer) in tqdm(
-                enumerate(zip(self.layer_names, self.layers)),
+                enumerate(zip(self.layer_names, self.layers, strict=True)),
                 total=len(self.layers),
                 desc=f"Running layers ({self._device})",
                 disable=False,

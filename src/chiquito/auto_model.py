@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from transformers import AutoConfig
 
@@ -9,10 +9,10 @@ if TYPE_CHECKING:
 
 
 class AutoModel:
-    _REGISTRY: dict[str, type[ChiquitoModel]] = {}
+    _REGISTRY: ClassVar[dict[str, type[ChiquitoModel]]] = {}
 
     def __init__(self):
-        raise EnvironmentError(
+        raise OSError(
             "AutoModel is designed to be instantiated using "
             "AutoModel.from_pretrained(pretrained_model_name_or_path)"
         )
