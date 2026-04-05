@@ -1,5 +1,7 @@
 # Chiquito
 
+![Chiquito](./resources/cover.png)
+
 Chiquito offers layer by layer LLM inference for machines with limited VRAM but plenty of RAM. It loads HuggingFace transformer models one layer at a time onto the GPU, making it possible to run large models on consumer hardware. It is a clean, minimal rewrite inspired by [AirLLM](https://github.com/lyogavin/airllm).
 
 **The twist:** while AirLLM loads weights from disk on every forward pass, Chiquito preloads all layer weights into system RAM by default (`preload_to_ram=True`). Copying from RAM to GPU over PCIe is 2-5x faster than reading from even a fast NVMe SSD, so inference is noticeably quicker if you have the RAM to spare.
@@ -114,6 +116,8 @@ All modes produce identical output. With a larger model, the preload advantage s
 ## Documentation
 
 See [docs/](docs/README.md) for developer documentation covering the concepts behind the code: layer splitting, RAM preloading, the sliding window, KV cache, and how to extend Chiquito for new architectures.
+
+Also, see [tutorial/](tutorial/README.md) for an introduction to the concepts involved in the source code and a step by step guide on how the project was built.
 
 ## Acknowledgments
 
