@@ -76,6 +76,8 @@ if weight_map is None:
 
 This is straightforward but uses a lot of RAM (the entire model must fit in memory at once). For small models this is fine.
 
+You might wonder: if we have to load the entire file to split it, what's the point? The key is that **splitting is a one-time preparation step, not part of inference**. You pay the full-memory cost once, during the split. After that, every inference run loads only one layer at a time (~500 MB instead of ~14 GB), and thanks to the `.done` markers the split is never repeated.
+
 ### Case 2: Multi-shard model
 
 For sharded models, we work incrementally to minimize RAM usage ([`splitter.py:70-111`](../src/chiquito/splitter.py#L70-L111)):
