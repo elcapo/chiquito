@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import ClassVar, Any
+from typing import Any, ClassVar
 
 import torch
 import torch.nn as nn
@@ -160,8 +160,6 @@ class ChiquitoModel(GenerationMixin):
         # Preload weights to RAM
         if self._window_size is None:
             self._preload_all_layers()
-        elif self._window_size > 0:
-            self._start_window_cache()
 
     def _build_layer_name_list_from_config(
         self, model_id_or_path: str, hf_token: str | None
@@ -344,7 +342,9 @@ class ChiquitoModel(GenerationMixin):
     ) -> tuple[torch.Tensor, torch.Tensor] | None:
         rotary_emb = getattr(getattr(self.model, "model", None), "rotary_emb", None)
         if rotary_emb is not None:
-            result: tuple[torch.Tensor, torch.Tensor] = rotary_emb(hidden_states, position_ids=position_ids)
+            result: tuple[torch.Tensor, torch.Tensor] = rotary_emb(
+                hidden_states, position_ids=position_ids
+            )
             return result
         return None
 
