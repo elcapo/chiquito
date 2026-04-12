@@ -1,6 +1,6 @@
 # Chiquito Tutorial
 
-A step-by-step tutorial that teaches every concept needed to understand and recreate the Chiquito source code (~980 lines of Python).
+A step-by-step tutorial that teaches every concept needed to understand and recreate the Chiquito source code.
 
 ## Prerequisites
 

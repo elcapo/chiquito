@@ -55,7 +55,7 @@ The reset happens at the start of `forward()` ([`model.py:426-434`](https://gith
 ```python
 def forward(self, input_ids, ...):
     if self.hf_quantizer is not None:
-        # Quantized models need full reinit (more on this in Unit 10)
+        # Quantized models need full reinit (see "Pre-Quantized Weight Caching")
         del self.model
         clean_memory()
         self._init_model()
@@ -116,7 +116,7 @@ if position_ids is None:
 
 During prefill: `[0, 1, 2, ..., seq_len-1]`. During decode: `[past_len]` (a single position for the single new token).
 
-These position IDs are used by the RoPE module to compute position embeddings (see [Unit 04](04-transformer-architecture.md)).
+These position IDs are used by the RoPE module to compute position embeddings (see [Transformer Architecture](04-transformer-architecture.md)).
 
 ## The forward loop
 

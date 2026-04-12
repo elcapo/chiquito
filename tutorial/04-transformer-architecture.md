@@ -70,11 +70,11 @@ class ChiquitoModel(GenerationMixin):
     }
 ```
 
-Different model architectures use different names (e.g., ChatGLM uses `transformer.encoder.layers` instead of `model.layers`). We will see in [Unit 11](11-extensibility.md) how to handle this.
+Different model architectures use different names (e.g., ChatGLM uses `transformer.encoder.layers` instead of `model.layers`). We will see in [Architecture Extensibility](11-extensibility.md) how to handle this.
 
 ## Creating a model on the meta device
 
-As we saw in [Unit 02](02-pytorch-foundations.md), we can create a full model architecture without allocating any memory by using the meta device:
+As we saw in [PyTorch Foundations](02-pytorch-foundations.md), we can create a full model architecture without allocating any memory by using the meta device:
 
 ```python
 from accelerate import init_empty_weights

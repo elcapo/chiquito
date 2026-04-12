@@ -81,7 +81,7 @@ The three loading strategies (which we will build step by step in this tutorial)
 
 ## What we will build
 
-Over the course of this tutorial, we will build the complete Chiquito library (~745 lines of Python) from scratch. By the end, you will have a working inference engine that can run models much larger than your GPU's VRAM.
+Over the course of this tutorial, we will build the complete Chiquito library from scratch. By the end, you will have a working inference engine that can run models much larger than your GPU's VRAM.
 
 The only prerequisites are:
 - Python proficiency

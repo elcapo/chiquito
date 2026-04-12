@@ -1,18 +1,16 @@
 # Putting It All Together
 
-Over the previous 11 units we have built every piece of Chiquito: the splitter, the meta device model, the layer-by-layer forward pass, KV cache, memory management, three loading strategies, quantization, and architecture extensibility. This final unit shows how all the pieces connect and traces the complete flow from construction to text generation.
+Over the previous chapters we have built every piece of Chiquito: the splitter, the meta device model, the layer-by-layer forward pass, KV cache, memory management, three loading strategies, quantization, and architecture extensibility. This final chapter shows how all the pieces connect and traces the complete flow from construction to text generation.
 
 ## The file map
 
-The entire library is ~980 lines across 5 files:
-
-| File | Lines | Responsibility |
-|------|-------|---------------|
-| [`__init__.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/__init__.py) | 4 | Package exports |
-| [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) | 40 | Factory + registry (Unit 11) |
-| [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py) | 631 | Core engine (Units 06-10) |
-| [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) | 259 | Checkpoint splitting + pre-quantization (Units 05, 10) |
-| [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) | 49 | Memory + I/O helpers (Units 03, 08) |
+| File | Responsibility |
+|------|---------------|
+| [`__init__.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/__init__.py) | Package exports |
+| [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) | Factory + registry ([Architecture Extensibility](11-extensibility.md)) |
+| [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py) | Core engine ([The Forward Pass](06-forward-pass.md) through [Quantization](10-quantization.md)) |
+| [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) | Checkpoint splitting + pre-quantization ([Splitting Checkpoints](05-checkpoint-splitting.md), [Quantization](10-quantization.md)) |
+| [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) | Memory + I/O helpers ([HuggingFace Models](03-huggingface-models.md), [Memory Management](08-memory-management.md)) |
 
 ## The initialization sequence
 
@@ -200,4 +198,4 @@ Starting from just Python, the concept of an LLM, and the idea of inference, you
 10. **Quantization** — 4-bit/8-bit compression to reduce transfer bottleneck
 11. **Extensibility** — factory pattern and override points for new architectures
 
-These concepts — combined into ~980 lines of Python — enable running models that need 140 GB of VRAM on a GPU with 8 GB.
+These concepts enable running models that need 140 GB of VRAM on a GPU with 8 GB.

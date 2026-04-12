@@ -123,7 +123,7 @@ On the first call, `past_key_values` is None, so `input_ids` is the full prompt.
 
 ### 3. `forward()` — the layer-by-layer forward pass
 
-This is what we built in [Unit 06](06-forward-pass.md). `GenerationMixin` calls it, gets back logits and the updated cache, samples the next token, and loops.
+This is what we built in [The Forward Pass](06-forward-pass.md). `GenerationMixin` calls it, gets back logits and the updated cache, samples the next token, and loops.
 
 ### 4. `__call__` — make the model callable
 

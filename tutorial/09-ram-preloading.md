@@ -25,7 +25,7 @@ else:
 
 ## Mode 1: Full preload (`preload_to_ram=True`)
 
-At initialization, load every layer's weights into RAM and pin them for fast DMA transfers. We saw this in [Unit 08](08-memory-management.md):
+At initialization, load every layer's weights into RAM and pin them for fast DMA transfers. We saw this in [Memory Management](08-memory-management.md):
 
 ```python
 def _preload_all_layers(self):

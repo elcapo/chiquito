@@ -2,7 +2,7 @@
 
 Everything we have built so far assumes Llama-style naming: `model.embed_tokens`, `model.layers.N`, `model.norm`, `lm_head`. But not all models follow this convention. ChatGLM uses `transformer.encoder.layers`, Phi uses `model.layers` but with a different position embedding setup, and so on.
 
-Chiquito handles this with two mechanisms: a **factory pattern with registry** for architecture detection, and **override points** for customizing layer execution. The factory is in [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) (~40 lines), and the override points are in [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py).
+Chiquito handles this with two mechanisms: a **factory pattern with registry** for architecture detection, and **override points** for customizing layer execution. The factory is in [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py), and the override points are in [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py).
 
 ## The LAYER_NAMES dict
 
