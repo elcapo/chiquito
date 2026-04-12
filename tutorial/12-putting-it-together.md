@@ -4,15 +4,15 @@ Over the previous 11 units we have built every piece of Chiquito: the splitter, 
 
 ## The file map
 
-The entire library is ~745 lines across 5 files:
+The entire library is ~980 lines across 5 files:
 
 | File | Lines | Responsibility |
 |------|-------|---------------|
 | [`__init__.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/__init__.py) | 4 | Package exports |
-| [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) | 41 | Factory + registry (Unit 11) |
-| [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py) | 532 | Core engine (Units 06-10) |
-| [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) | 126 | Checkpoint splitting (Unit 05) |
-| [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) | 46 | Memory + I/O helpers (Units 03, 08) |
+| [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) | 40 | Factory + registry (Unit 11) |
+| [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py) | 631 | Core engine (Units 06-10) |
+| [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) | 259 | Checkpoint splitting + pre-quantization (Units 05, 10) |
+| [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) | 49 | Memory + I/O helpers (Units 03, 08) |
 
 ## The initialization sequence
 
@@ -39,9 +39,9 @@ ChiquitoModel.__init__
   │  ├─ Create meta model, count layers
   │  └─ Return ["model.embed_tokens", "model.layers.0", ..., "model.norm", "lm_head"]
   │
-  ├─ Split checkpoint
+  ├─ Split checkpoint (and pre-quantize if quantization requested)
   │  ├─ resolve_model_path() — download from Hub if needed
-  │  └─ split_and_save_layers() — create chiquito_split/ with per-layer files
+  │  └─ split_and_save_layers() — create chiquito_split/ (+ chiquito_split_{4bit,8bit}/)
   │
   ├─ Load config, tokenizer, generation_config
   │
@@ -70,7 +70,7 @@ GenerationMixin.generate()
   │  │  └─ Returns full prompt, no trimming
   │  │
   │  └─ forward(input_ids=[prompt], past_key_values=empty)
-  │     ├─ Reset model (meta or full reinit for quantized)
+  │     ├─ Reset model (meta for pre-quantized/fp16, full reinit for on-the-fly quantized)
   │     ├─ Restart sliding window cache if applicable
   │     ├─ Build triangular causal mask (seq_len x seq_len)
   │     ├─ For each layer:
@@ -151,8 +151,10 @@ User code
       └─ ChiquitoModel.__init__()       [model.py]
           ├─ resolve_model_path()        [utils.py]
           ├─ find_or_create_split()      [splitter.py]
-          │   ├─ load_file()             [safetensors]
-          │   ├─ save_safetensors()      [utils.py]
+          │   ├─ split_and_save_layers() [splitter.py]
+          │   │   ├─ load_file()         [safetensors]
+          │   │   ├─ save_safetensors()  [utils.py]
+          │   │   └─ _quantize_state_dict()  [splitter.py → bitsandbytes]
           │   └─ clean_memory()          [utils.py]
           ├─ AutoConfig / AutoTokenizer  [transformers]
           ├─ init_empty_weights()        [accelerate]
@@ -163,6 +165,8 @@ User code
       └─ model.forward()                [model.py]
           ├─ _load_layer_to_cpu()        [model.py → utils.py or cache]
           ├─ _move_layer_to_device()     [model.py → accelerate]
+          │   └─ _move_quantized_layer_to_device()  [model.py → bitsandbytes]
+          │       └─ parse_quantized_state_dict()    [splitter.py]
           ├─ Layer execution             [transformers model internals]
           ├─ set_module_tensor_to_device("meta")  [accelerate]
           └─ clean_gpu_memory()          [utils.py]
@@ -177,7 +181,7 @@ User code
 | Meta device for model skeleton | Zero-memory initialization; weight loading is controlled per-layer |
 | Pinned memory for RAM cache | 2-5x faster DMA transfers over PCIe |
 | Sliding window as bounded buffer | Enables models that exceed RAM capacity with predictable memory usage |
-| On-the-fly quantization (not pre-quantized) | Works with any fp16 model without requiring pre-quantized checkpoints |
+| Pre-quantized weight caching | Quantize once, cache to disk; subsequent runs load packed weights directly — faster transfers, less RAM |
 | Override points instead of config | Subclasses can change behavior (how to call a layer) not just data (what names to use) |
 
 ## What you now know
@@ -196,4 +200,4 @@ Starting from just Python, the concept of an LLM, and the idea of inference, you
 10. **Quantization** — 4-bit/8-bit compression to reduce transfer bottleneck
 11. **Extensibility** — factory pattern and override points for new architectures
 
-These concepts — combined into ~745 lines of Python — enable running models that need 140 GB of VRAM on a GPU with 8 GB.
+These concepts — combined into ~980 lines of Python — enable running models that need 140 GB of VRAM on a GPU with 8 GB.

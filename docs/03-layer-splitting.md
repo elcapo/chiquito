@@ -33,6 +33,18 @@ These names are defined in `ChiquitoModel.LAYER_NAMES` and can be overridden by 
 
 Each layer file is accompanied by a `.done` marker (e.g., `model.layers.0.safetensors.done`). Splitting writes the safetensors file first, then touches the marker. If the process is interrupted, incomplete layers (missing marker) will be re-split on the next run.
 
+## Pre-quantized splits
+
+When a quantization level is requested (e.g. `quantization="4bit"`), the splitter creates an additional directory alongside the base fp16 split:
+
+| Quantization | Directory |
+|---|---|
+| None (fp16) | `chiquito_split/` |
+| 4-bit | `chiquito_split_4bit/` |
+| 8-bit | `chiquito_split_8bit/` |
+
+The quantized split is built from the base fp16 split: each layer's fp16 weights are quantized using bitsandbytes and saved to the quantized directory. Only decoder layers (`model.layers.*`) are quantized — non-decoder layers (embedding, norm, lm_head) are kept in fp16 as they are small. See [Quantization](06-quantization.md) for details.
+
 ## Disk usage
 
-The split files together are roughly the same size as the original model. For a 7B fp16 model, that's ~14 GB of split files alongside the ~14 GB original. The original can be deleted manually if disk space is tight.
+The base fp16 split files are roughly the same size as the original model. For a 7B fp16 model, that's ~14 GB of split files alongside the ~14 GB original. Quantized splits are smaller (~4x for 4-bit, ~2x for 8-bit). The original model files can be deleted manually if disk space is tight.

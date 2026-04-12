@@ -1,6 +1,6 @@
 # Splitting Checkpoints into Per-Layer Files
 
-Now we start building. The first practical piece of Chiquito is the **splitter**: code that takes a HuggingFace model checkpoint and produces one safetensors file per layer. This is implemented in [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) (~125 lines).
+Now we start building. The first practical piece of Chiquito is the **splitter**: code that takes a HuggingFace model checkpoint and produces one safetensors file per layer. It also handles pre-quantizing those layers when a quantization level is requested. This is implemented in [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) (~260 lines).
 
 ## Why we need to split
 
@@ -10,24 +10,40 @@ We want the opposite: one file per layer, so that loading layer 5 means reading 
 
 ## The target structure
 
-Given a model at `/path/to/model/`, we create a `chiquito_split/` subdirectory:
+Given a model at `/path/to/model/`, we create a `chiquito_split/` subdirectory with per-layer files. When a quantization level is requested, we additionally create a `chiquito_split_{4bit,8bit}/` directory with pre-quantized weights:
 
 ```
 /path/to/model/
 ├── model.safetensors.index.json
 ├── model-00001-of-00004.safetensors
 ├── ...
-└── chiquito_split/
-    ├── model.embed_tokens.safetensors
-    ├── model.layers.0.safetensors
-    ├── model.layers.1.safetensors
-    ├── ...
-    ├── model.layers.21.safetensors
-    ├── model.norm.safetensors
-    ├── lm_head.safetensors
-    ├── model.embed_tokens.safetensors.done   # completion markers
-    ├── model.layers.0.safetensors.done
+├── chiquito_split/                          # base fp16 split
+│   ├── model.embed_tokens.safetensors
+│   ├── model.layers.0.safetensors
+│   ├── model.layers.1.safetensors
+│   ├── ...
+│   ├── model.layers.21.safetensors
+│   ├── model.norm.safetensors
+│   ├── lm_head.safetensors
+│   ├── model.embed_tokens.safetensors.done  # completion markers
+│   ├── model.layers.0.safetensors.done
+│   └── ...
+├── chiquito_split_4bit/                     # pre-quantized (4-bit)
+│   ├── model.embed_tokens.safetensors
+│   ├── model.layers.0.safetensors
+│   ├── ...
+│   └── lm_head.safetensors
+└── chiquito_split_8bit/                     # pre-quantized (8-bit)
     └── ...
+```
+
+The split directory name is computed by `split_dir_name()`:
+
+```python
+def split_dir_name(quantization: str | None = None) -> str:
+    if quantization:
+        return f"{SPLIT_DIR_NAME}_{quantization}"
+    return SPLIT_DIR_NAME
 ```
 
 Each per-layer file contains only the parameters whose names start with that layer's prefix. For example, `model.layers.5.safetensors` contains keys like `model.layers.5.self_attn.q_proj.weight`, `model.layers.5.mlp.gate_proj.weight`, etc.
@@ -144,30 +160,34 @@ This means subsequent runs of Chiquito on the same model skip the splitting step
 
 ## The entry point: find_or_create_split
 
-The function called by `ChiquitoModel.__init__` is `find_or_create_split()` ([`splitter.py:114-126`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L114-L126)):
+The function called by `ChiquitoModel.__init__` is `find_or_create_split()` ([`splitter.py:241-259`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py#L241-L259)):
 
 ```python
-def find_or_create_split(model_id_or_path, layer_names, hf_token=None):
+def find_or_create_split(model_id_or_path, layer_names, hf_token=None, quantization=None):
     model_path = resolve_model_path(model_id_or_path, hf_token)
     repo_id = None if Path(model_id_or_path).is_dir() else model_id_or_path
     split_dir = split_and_save_layers(
-        model_path, layer_names, hf_token=hf_token, repo_id=repo_id
+        model_path, layer_names, hf_token=hf_token, repo_id=repo_id,
+        quantization=quantization,
     )
     return model_path, split_dir
 ```
 
-It resolves the model path (downloading from HuggingFace if needed), determines the `repo_id` for lazy shard downloading, runs the split, and returns both the model path and the split directory.
+It resolves the model path (downloading from HuggingFace if needed), determines the `repo_id` for lazy shard downloading, runs the split (and quantization, if requested), and returns both the model path and the split directory.
 
-This is called at [`model.py:141-143`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L141-L143):
+When `quantization` is provided, `split_and_save_layers()` first ensures the base fp16 split exists, then quantizes each layer and saves the result to the quantized directory (e.g., `chiquito_split_4bit/`). See [Unit 10](10-quantization.md) for details.
+
+This is called at [`model.py:139-145`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L139-L145):
 
 ```python
 self._model_path, self._split_dir = find_or_create_split(
-    model_id_or_path, all_layer_names, hf_token=hf_token
+    model_id_or_path, all_layer_names, hf_token=hf_token,
+    quantization=quantization,
 )
 ```
 
 ## Summary
 
-The splitter does one job: convert HuggingFace's multi-shard checkpoint into per-layer files that Chiquito can load individually. It handles single-file and sharded models, uses completion markers for crash recovery, and caches splits so subsequent runs are instant.
+The splitter converts HuggingFace's multi-shard checkpoint into per-layer files that Chiquito can load individually. It handles single-file and sharded models, uses completion markers for crash recovery, and caches splits so subsequent runs are instant. When a quantization level is requested, it also pre-quantizes each layer and stores the result in a dedicated directory — see [Unit 10](10-quantization.md) for the full quantization story.
 
 After splitting, our model directory contains one `.safetensors` file per layer, and the forward pass can load them one at a time — which is exactly what we build next.

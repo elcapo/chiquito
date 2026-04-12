@@ -1,6 +1,6 @@
 # Chiquito Tutorial
 
-A step-by-step tutorial that teaches every concept needed to understand and recreate the Chiquito source code (~745 lines of Python).
+A step-by-step tutorial that teaches every concept needed to understand and recreate the Chiquito source code (~980 lines of Python).
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ Everything else is explained from scratch.
 
 8. [Memory Management](08-memory-management.md) — `gc.collect`, `malloc_trim`, `empty_cache`, and pinned memory. Covers `utils.py`.
 9. [RAM Preloading and Sliding Window](09-ram-preloading.md) — Three loading strategies and the producer-consumer pattern.
-10. [Quantization](10-quantization.md) — On-the-fly 4-bit/8-bit quantization with bitsandbytes.
+10. [Quantization](10-quantization.md) — Pre-quantized 4-bit/8-bit weight caching with bitsandbytes.
 
 ### Extensibility and integration
 
