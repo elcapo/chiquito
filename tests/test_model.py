@@ -1,6 +1,5 @@
-import threading
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import torch
 from transformers.cache_utils import DynamicCache

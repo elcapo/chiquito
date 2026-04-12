@@ -66,7 +66,7 @@ model = AutoModel.from_pretrained(
 )
 ```
 
-To enable on-the-fly 4-bit quantization (requires [bitsandbytes](https://github.com/bitsandbytes-foundation/bitsandbytes)):
+To enable 4-bit quantization (requires [bitsandbytes](https://github.com/bitsandbytes-foundation/bitsandbytes)):
 
 ```python
 model = AutoModel.from_pretrained(
@@ -76,7 +76,7 @@ model = AutoModel.from_pretrained(
 )
 ```
 
-This reduces weight transfer times by ~4x (4-bit) or ~2x (8-bit) and makes large models fit in RAM. A 32B model goes from ~65 GB to ~16 GB with 4-bit quantization.
+On the first run, Chiquito pre-quantizes the weights and stores them in a dedicated split directory (`chiquito_split_4bit/`). Subsequent runs load the already-quantized files directly, avoiding re-quantization overhead. This reduces weight transfer times by ~4x (4-bit) or ~2x (8-bit) and makes large models fit in RAM. A 32B model goes from ~65 GB to ~16 GB with 4-bit quantization.
 
 ## Benchmarks
 

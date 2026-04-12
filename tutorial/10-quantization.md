@@ -1,6 +1,6 @@
-# On-the-Fly Quantization with bitsandbytes
+# Pre-Quantized Weight Caching with bitsandbytes
 
-In layer-by-layer inference, the bottleneck is transferring weights from CPU to GPU. Quantization reduces the size of those weights, directly speeding up the transfer. Chiquito supports 4-bit and 8-bit quantization via the **bitsandbytes** library, applied on-the-fly as weights are loaded onto the GPU.
+In layer-by-layer inference, the bottleneck is transferring weights from CPU to GPU. Quantization reduces the size of those weights, directly speeding up the transfer. Chiquito supports 4-bit and 8-bit quantization via the **bitsandbytes** library. Weights are quantized once on the first run and cached to disk so that subsequent runs load the already-quantized data directly.
 
 ## Why quantization helps here
 
@@ -20,9 +20,9 @@ That is a ~4x speedup in the dominant cost.
 
 ## The two quantization formats
 
-### 8-bit: LLM.int8
+### 8-bit: block-wise absmax
 
-Each weight is stored as an 8-bit integer plus a per-group scaling factor. During computation, weights are dequantized back to fp16 on-the-fly using optimized CUDA kernels.
+Each weight block (64 elements) is stored as 8-bit integers plus a per-block scaling factor (absmax). During computation, weights are dequantized back to fp16 on-the-fly using optimized CUDA kernels.
 
 ### 4-bit: NF4 (Normal Float 4)
 
@@ -30,95 +30,91 @@ NF4 is an information-theoretically optimal 4-bit format for normally distribute
 
 Both formats are provided by bitsandbytes and integrated into HuggingFace transformers.
 
-## How Chiquito applies quantization
+## Per-quantization split directories
 
-### Step 1: Configure bitsandbytes
+Each quantization level gets its own directory alongside the base fp16 split:
 
-During model initialization, `_init_model()` creates a `BitsAndBytesConfig` and applies it via `AutoHfQuantizer` ([`model.py:211-237`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L211-L237)):
+| Quantization | Directory | Contents |
+|---|---|---|
+| None (fp16) | `chiquito_split/` | Original fp16 weights per layer |
+| 4-bit | `chiquito_split_4bit/` | Packed NF4 data + quant state |
+| 8-bit | `chiquito_split_8bit/` | Block-wise int8 data + quant state |
 
-```python
-if self._quantization is not None:
-    from transformers import BitsAndBytesConfig
-    from transformers.quantizers import AutoHfQuantizer
-
-    if self._quantization == "4bit":
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=self._dtype,
-            bnb_4bit_quant_type="nf4",
-        )
-    elif self._quantization == "8bit":
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-    else:
-        raise ValueError(...)
-
-    self.hf_quantizer = AutoHfQuantizer.from_config(bnb_config)
-    device_map = self.hf_quantizer.update_device_map(None)
-    self.hf_quantizer.preprocess_model(model=self.model, device_map=device_map)
-```
-
-The `preprocess_model()` call replaces standard `nn.Linear` modules with bitsandbytes equivalents:
-- 4-bit: `bnb.nn.Linear4bit`
-- 8-bit: `bnb.nn.Linear8bitLt`
-
-These are still on the meta device at this point — no quantization has happened yet. The modules are just **prepared** to accept quantized weights.
-
-### Step 2: Quantize on-the-fly during weight loading
-
-The quantization happens inside `set_module_tensor_to_device()` (from the `accelerate` library), which Chiquito calls in `_move_layer_to_device()` ([`model.py:318-328`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L318-L328)):
+The naming is handled by `split_dir_name()` in `splitter.py`:
 
 ```python
-def _move_layer_to_device(self, state_dict):
-    moved = list(state_dict.keys())
-    for param_name in moved:
-        set_module_tensor_to_device(
-            self.model, param_name, self._device,
-            value=state_dict[param_name], dtype=self._dtype,
-        )
-    return moved
+def split_dir_name(quantization: str | None = None) -> str:
+    if quantization:
+        return f"{SPLIT_DIR_NAME}_{quantization}"
+    return SPLIT_DIR_NAME
 ```
 
-When `set_module_tensor_to_device` detects that the target module is a bitsandbytes linear layer, it automatically quantizes the fp16 tensor as it places it on the GPU. The fp16 data goes in, and the stored result is 4-bit (or 8-bit). This is transparent to our code.
+## How Chiquito creates the quantized split
 
-### Step 3: Forward computation with quantized weights
+### Step 1: Ensure the base (fp16) split exists
 
-During the forward pass, the bitsandbytes linear layers use optimized CUDA kernels to dequantize weights on-the-fly during matrix multiplication. The dequantization cost is small compared to the transfer time savings.
+On the first run, `split_and_save_layers()` creates the base `chiquito_split/` directory with per-layer safetensors files — the same as in non-quantized mode.
 
-## The reset problem
+### Step 2: Quantize and save each layer
 
-There is one important complication. Bitsandbytes modules maintain internal **quantization state** — absmax values, codebooks, and other metadata computed during quantization. This state cannot survive a round-trip to the meta device. If we move a `Linear4bit` module to meta and back, the quantization state is lost and the module breaks.
-
-This is why quantized models need a full `del model` + `_init_model()` reset instead of the lightweight `_reset_model_to_meta()` ([`model.py:427-434`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L427-L434)):
+When a quantization level is requested, `split_and_save_layers()` reads each layer from the base split, quantizes the 2-D+ weight tensors with bitsandbytes, and writes the result to the quantized directory:
 
 ```python
-if self.hf_quantizer is not None:
-    # Quantized models need full reinit
-    del self.model
-    clean_memory()
-    self._init_model()
-else:
-    self._reset_model_to_meta()
-    clean_gpu_memory()
+fp16_data = load_safetensors(layer_file_path(base_dir, layer_name))
+quantized = _quantize_state_dict(fp16_data, quantization)
+save_safetensors(quantized, layer_file_path(split_dir, layer_name))
 ```
 
-This is more expensive (creates a new model object from scratch), but it is the only way to get clean bitsandbytes modules ready for fresh quantization. The heavy `clean_memory()` call (gc + malloc_trim + empty_cache) ensures the old model is fully freed.
+The `_quantize_state_dict()` function calls `bitsandbytes.functional.quantize_4bit()` (or `quantize_blockwise()` for 8-bit) and serializes the result using `QuantState.as_dict(packed=True)`, which converts the quantization metadata into tensors suitable for safetensors:
 
-## Pre-quantized models
+- The packed weight data (uint8 for 4-bit, int8 for 8-bit) is saved under the original parameter name.
+- The quant-state entries (absmax, quant\_map, etc.) are saved with suffixed keys like `weight.absmax`, `weight.quant_map`.
 
-Some HuggingFace models are distributed already quantized (the weights on disk are already in 4-bit or 8-bit format). Chiquito detects this via `config.quantization_config` and handles it similarly ([`model.py:230-237`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py#L230-L237)):
+### Step 3: On subsequent runs, skip everything
+
+`split_and_save_layers()` checks for `.done` markers per layer. If the entire quantized split is complete, it returns immediately:
+
+```
+All layers already split in /path/to/model/chiquito_split_4bit
+```
+
+## How Chiquito loads pre-quantized weights
+
+### Step 1: Configure bitsandbytes modules
+
+During model initialization, `_init_model()` still creates a `BitsAndBytesConfig` and calls `preprocess_model()` to replace `nn.Linear` with `bnb.nn.Linear4bit` (or `Linear8bitLt`). This is needed so the forward pass uses the quantized CUDA kernels.
+
+### Step 2: Load and reconstruct quantized parameters
+
+When loading a layer, `_move_quantized_layer_to_device()` uses `parse_quantized_state_dict()` to separate packed weight data from quant-state entries:
 
 ```python
-elif quantization_config is not None:
-    from transformers.quantizers import AutoHfQuantizer
-
-    self.hf_quantizer = AutoHfQuantizer.from_config(
-        quantization_config, pre_quantized=True
-    )
-    device_map = self.hf_quantizer.update_device_map(None)
-    self.hf_quantizer.preprocess_model(model=self.model, device_map=device_map)
+base_params, qs_map = parse_quantized_state_dict(raw_state_dict)
 ```
 
-The `pre_quantized=True` flag tells the quantizer that the weights are already quantized, so it should not re-quantize them during loading.
+For each quantized weight, it reconstructs a `Params4bit` (or `Int8Params`) with `bnb_quantized=True` and places it on the GPU directly — bypassing `set_module_tensor_to_device()` which would attempt to re-quantize:
+
+```python
+qs = QuantState.from_dict(qs_map[name], device=self._device)
+param = bnb.nn.Params4bit(
+    tensor, requires_grad=False,
+    quant_state=qs, quant_type=qs.quant_type,
+    blocksize=qs.blocksize, bnb_quantized=True,
+)
+module._parameters[splits[-1]] = param.to(self._device)
+```
+
+Non-quantized tensors (biases, norm weights) are loaded normally via `set_module_tensor_to_device()`.
+
+### Step 3: Lightweight model reset
+
+Pre-quantized models use the lightweight `_reset_model_to_meta()` between forward passes. The bnb module types (`Linear4bit`, `Linear8bitLt`) survive the meta round-trip, and `_move_quantized_layer_to_device()` replaces parameters directly on each layer load.
+
+This avoids the expensive `del model; _init_model()` cycle that was previously needed for quantized models.
+
+## Pre-quantized HuggingFace models
+
+Some HuggingFace models are distributed already quantized (the weights on disk are already in a quantized format). Chiquito detects this via `config.quantization_config` and handles it with the `pre_quantized=True` flag on the quantizer.
 
 ## Usage
 
@@ -143,9 +139,9 @@ model = AutoModel.from_pretrained(
 | Aspect | Detail |
 |--------|--------|
 | **Why** | Smaller weights = faster CPU→GPU transfer (the bottleneck) |
-| **How** | bitsandbytes replaces `nn.Linear` with quantized versions; `set_module_tensor_to_device` quantizes on placement |
-| **4-bit** | NF4 format, ~4x transfer speedup, `BitsAndBytesConfig(load_in_4bit=True)` |
-| **8-bit** | LLM.int8, ~2x transfer speedup, `BitsAndBytesConfig(load_in_8bit=True)` |
-| **Caveat** | Quantized models cannot use `_reset_model_to_meta()` — they need full reinit |
+| **How** | Weights quantized once, cached to `chiquito_split_{4bit,8bit}/`, loaded pre-quantized on subsequent runs |
+| **4-bit** | NF4 format, ~4x transfer speedup, ~4x less RAM with `preload_to_ram=True` |
+| **8-bit** | Block-wise int8, ~2x transfer speedup, ~2x less RAM |
+| **Reset** | Pre-quantized models use lightweight `_reset_model_to_meta()` — no full reinit needed |
 
 Quantization is the last major optimization. Together with RAM preloading and the sliding window cache, it makes layer-by-layer inference practical for large models on consumer hardware.

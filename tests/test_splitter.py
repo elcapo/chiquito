@@ -10,7 +10,9 @@ from chiquito.splitter import (
     find_or_create_split,
     is_layer_split,
     layer_file_path,
+    parse_quantized_state_dict,
     split_and_save_layers,
+    split_dir_name,
 )
 from chiquito.utils import save_safetensors
 
@@ -44,7 +46,9 @@ class TestIsLayerSplit:
 
 
 class TestSplitAndSaveLayers:
-    def _create_single_file_model(self, model_path: Path, tensors: dict[str, torch.Tensor]):
+    def _create_single_file_model(
+        self, model_path: Path, tensors: dict[str, torch.Tensor]
+    ):
         """Create a model directory with a single model.safetensors file."""
         model_path.mkdir(parents=True, exist_ok=True)
         save_safetensors(tensors, model_path / "model.safetensors")
@@ -102,9 +106,7 @@ class TestSplitAndSaveLayers:
         from chiquito.utils import load_safetensors
 
         loaded = load_safetensors(layer_file_path(split_dir, "model.embed_tokens"))
-        torch.testing.assert_close(
-            loaded["model.embed_tokens.weight"], embed_weight
-        )
+        torch.testing.assert_close(loaded["model.embed_tokens.weight"], embed_weight)
 
     def test_sharded_model_split(self, tmp_path):
         model_path = tmp_path / "model"
@@ -164,9 +166,7 @@ class TestSplitAndSaveLayers:
 class TestFindOrCreateSplit:
     @patch("chiquito.splitter.resolve_model_path")
     @patch("chiquito.splitter.split_and_save_layers")
-    def test_returns_model_path_and_split_dir(
-        self, mock_split, mock_resolve, tmp_path
-    ):
+    def test_returns_model_path_and_split_dir(self, mock_split, mock_resolve, tmp_path):
         model_path = tmp_path / "model"
         model_path.mkdir()
         split_dir = model_path / SPLIT_DIR_NAME
@@ -193,7 +193,11 @@ class TestFindOrCreateSplit:
         find_or_create_split(str(model_path), ["layer1"], hf_token="tok")
 
         mock_split.assert_called_once_with(
-            model_path, ["layer1"], hf_token="tok", repo_id=None
+            model_path,
+            ["layer1"],
+            hf_token="tok",
+            repo_id=None,
+            quantization=None,
         )
 
     @patch("chiquito.splitter.resolve_model_path")
@@ -205,5 +209,82 @@ class TestFindOrCreateSplit:
         find_or_create_split("org/model", ["layer1"])
 
         mock_split.assert_called_once_with(
-            tmp_path / "cached", ["layer1"], hf_token=None, repo_id="org/model"
+            tmp_path / "cached",
+            ["layer1"],
+            hf_token=None,
+            repo_id="org/model",
+            quantization=None,
         )
+
+    @patch("chiquito.splitter.resolve_model_path")
+    @patch("chiquito.splitter.split_and_save_layers")
+    def test_passes_quantization(self, mock_split, mock_resolve, tmp_path):
+        model_path = tmp_path / "model"
+        model_path.mkdir()
+        mock_resolve.return_value = model_path
+        mock_split.return_value = model_path / "chiquito_split_4bit"
+
+        find_or_create_split(str(model_path), ["layer1"], quantization="4bit")
+
+        mock_split.assert_called_once_with(
+            model_path,
+            ["layer1"],
+            hf_token=None,
+            repo_id=None,
+            quantization="4bit",
+        )
+
+
+class TestSplitDirName:
+    def test_no_quantization(self):
+        assert split_dir_name(None) == SPLIT_DIR_NAME
+
+    def test_4bit(self):
+        assert split_dir_name("4bit") == f"{SPLIT_DIR_NAME}_4bit"
+
+    def test_8bit(self):
+        assert split_dir_name("8bit") == f"{SPLIT_DIR_NAME}_8bit"
+
+
+class TestParseQuantizedStateDict:
+    def test_plain_tensors_returned_as_base(self):
+        raw = {
+            "layer.weight": torch.randn(4, 4),
+            "layer.bias": torch.randn(4),
+        }
+        base, qs = parse_quantized_state_dict(raw)
+        assert set(base.keys()) == {"layer.weight", "layer.bias"}
+        assert qs == {}
+
+    def test_quant_state_entries_grouped(self):
+        raw = {
+            "layer.weight": torch.randint(0, 255, (8,), dtype=torch.uint8),
+            "layer.weight.absmax": torch.randn(2),
+            "layer.weight.quant_map": torch.randn(16),
+            "layer.weight.quant_state.bitsandbytes__nf4": torch.tensor([]),
+            "layer.bias": torch.randn(4),
+        }
+        base, qs = parse_quantized_state_dict(raw)
+
+        assert set(base.keys()) == {"layer.weight", "layer.bias"}
+        assert "layer.weight" in qs
+        assert set(qs["layer.weight"].keys()) == {
+            "absmax",
+            "quant_map",
+            "quant_state.bitsandbytes__nf4",
+        }
+
+    def test_nested_quant_entries(self):
+        raw = {
+            "w": torch.randint(0, 255, (8,), dtype=torch.uint8),
+            "w.absmax": torch.randn(2),
+            "w.nested_absmax": torch.randn(1),
+            "w.nested_quant_map": torch.randn(16),
+        }
+        base, qs = parse_quantized_state_dict(raw)
+        assert set(base.keys()) == {"w"}
+        assert set(qs["w"].keys()) == {
+            "absmax",
+            "nested_absmax",
+            "nested_quant_map",
+        }

@@ -20,7 +20,7 @@ from transformers import (
 from transformers.cache_utils import DynamicCache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from .splitter import find_or_create_split, layer_file_path
+from .splitter import find_or_create_split, layer_file_path, parse_quantized_state_dict
 from .utils import clean_gpu_memory, clean_memory, load_safetensors
 
 
@@ -117,6 +117,7 @@ class ChiquitoModel(GenerationMixin):
         self._hf_token = hf_token
         self._prefetch = prefetch
         self._quantization = quantization
+        self._pre_quantized = quantization is not None
         self._ram_cache: dict[str, dict[str, torch.Tensor]] | None = None
         self._window_cache: _SlidingWindowCache | None = None
         self._window_size: int | None = None
@@ -138,7 +139,10 @@ class ChiquitoModel(GenerationMixin):
 
         # Split model into per-layer files
         self._model_path, self._split_dir = find_or_create_split(
-            model_id_or_path, all_layer_names, hf_token=hf_token
+            model_id_or_path,
+            all_layer_names,
+            hf_token=hf_token,
+            quantization=quantization,
         )
 
         # Load config, tokenizer, generation config
@@ -316,6 +320,9 @@ class ChiquitoModel(GenerationMixin):
         return load_safetensors(layer_file_path(self._split_dir, layer_name))
 
     def _move_layer_to_device(self, state_dict: dict[str, torch.Tensor]) -> list[str]:
+        if self._pre_quantized:
+            return self._move_quantized_layer_to_device(state_dict)
+
         moved = list(state_dict.keys())
         for param_name in moved:
             set_module_tensor_to_device(
@@ -325,6 +332,56 @@ class ChiquitoModel(GenerationMixin):
                 value=state_dict[param_name],
                 dtype=self._dtype,
             )
+        return moved
+
+    def _move_quantized_layer_to_device(
+        self, raw_state_dict: dict[str, torch.Tensor]
+    ) -> list[str]:
+        """Load pre-quantized weights, reconstruct bnb params, and place on device."""
+        import bitsandbytes as bnb
+        from bitsandbytes.functional import QuantState
+
+        base_params, qs_map = parse_quantized_state_dict(raw_state_dict)
+        moved: list[str] = []
+
+        for name, tensor in base_params.items():
+            if name in qs_map:
+                # Reconstruct quantized parameter from packed data + quant state
+                qs = QuantState.from_dict(qs_map[name], device=self._device)
+                if self._quantization == "4bit":
+                    param = bnb.nn.Params4bit(
+                        tensor,
+                        requires_grad=False,
+                        quant_state=qs,
+                        quant_type=qs.quant_type,
+                        blocksize=qs.blocksize,
+                        bnb_quantized=True,
+                    )
+                else:
+                    param = bnb.nn.Int8Params(
+                        tensor,
+                        requires_grad=False,
+                        has_fp16_weights=False,
+                    )
+                    param.quant_state = qs
+
+                # Set directly on module, bypassing set_module_tensor_to_device
+                # which would attempt to re-quantize.
+                splits = name.split(".")
+                module = self.model
+                for s in splits[:-1]:
+                    module = getattr(module, s)
+                module._parameters[splits[-1]] = param.to(self._device)
+            else:
+                set_module_tensor_to_device(
+                    self.model,
+                    name,
+                    self._device,
+                    value=tensor,
+                    dtype=self._dtype,
+                )
+            moved.append(name)
+
         return moved
 
     @property
@@ -427,12 +484,16 @@ class ChiquitoModel(GenerationMixin):
         return_dict: bool | None = None,
     ) -> tuple | CausalLMOutputWithPast:
         # Reset model to clean state
-        if self.hf_quantizer is not None:
-            # Quantized models need full reinit (bnb modules can't round-trip to meta)
+        if self.hf_quantizer is not None and not self._pre_quantized:
+            # On-the-fly quantized models need full reinit
+            # (bnb modules can't round-trip to meta)
             del self.model
             clean_memory()
             self._init_model()
         else:
+            # Pre-quantized and non-quantized models: lightweight reset.
+            # Module types (Linear4bit, etc.) survive the meta round-trip;
+            # _move_quantized_layer_to_device replaces params directly.
             self._reset_model_to_meta()
             clean_gpu_memory()
 
