@@ -139,11 +139,18 @@ def split_and_save_layers(
             )
 
         split_dir.mkdir(parents=True, exist_ok=True)
+        # Only quantize decoder layers (model.layers.*).  Non-decoder layers
+        # (embed_tokens, norm, lm_head) are kept in fp16 — they are small, and
+        # HF quantizers deliberately skip them (modules_to_not_convert).
+        _DECODER_PREFIX = "model.layers."
         for layer_name in tqdm(layer_names, desc=f"Quantizing layers ({quantization})"):
             if is_layer_split(split_dir, layer_name):
                 continue
             fp16_data = load_safetensors(layer_file_path(base_dir, layer_name))
-            quantized = _quantize_state_dict(fp16_data, quantization)
+            if layer_name.startswith(_DECODER_PREFIX):
+                quantized = _quantize_state_dict(fp16_data, quantization)
+            else:
+                quantized = fp16_data
             save_safetensors(quantized, layer_file_path(split_dir, layer_name))
             done_marker_path(split_dir, layer_name).touch()
             del fp16_data, quantized

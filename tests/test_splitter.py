@@ -154,6 +154,43 @@ class TestSplitAndSaveLayers:
 
         assert mtime_embed == mtime_embed2
 
+    def test_quantize_skips_non_decoder_layers(self, tmp_path):
+        """Non-decoder layers (embed, norm, lm_head) must stay fp16 in quantized splits."""
+        model_path = tmp_path / "model"
+        tensors = {
+            "model.embed_tokens.weight": torch.randn(10, 4),
+            "model.layers.0.self_attn.q_proj.weight": torch.randn(4, 4),
+            "model.norm.weight": torch.randn(4),
+            "lm_head.weight": torch.randn(10, 4),
+        }
+        self._create_single_file_model(model_path, tensors)
+
+        layer_names = [
+            "model.embed_tokens",
+            "model.layers.0",
+            "model.norm",
+            "lm_head",
+        ]
+        # Create base split first
+        split_and_save_layers(model_path, layer_names)
+
+        # Mock _quantize_state_dict to track which layers it's called on
+        quantize_calls: list[dict] = []
+        original_quantize = __import__(
+            "chiquito.splitter", fromlist=["_quantize_state_dict"]
+        )._quantize_state_dict
+
+        def tracking_quantize(sd, quant, **kw):
+            quantize_calls.append(dict(sd))
+            return original_quantize(sd, quant, **kw)
+
+        with patch("chiquito.splitter._quantize_state_dict", side_effect=tracking_quantize):
+            split_and_save_layers(model_path, layer_names, quantization="4bit")
+
+        # Only decoder layers should have been quantized
+        assert len(quantize_calls) == 1
+        assert "model.layers.0.self_attn.q_proj.weight" in quantize_calls[0]
+
     def test_raises_when_no_model_files(self, tmp_path):
         import pytest
 

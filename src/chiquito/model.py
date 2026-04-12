@@ -319,9 +319,17 @@ class ChiquitoModel(GenerationMixin):
             return self._window_cache.get(layer_name)
         return load_safetensors(layer_file_path(self._split_dir, layer_name))
 
-    def _move_layer_to_device(self, state_dict: dict[str, torch.Tensor]) -> list[str]:
+    def _move_layer_to_device(
+        self, state_dict: dict[str, torch.Tensor], layer_name: str = ""
+    ) -> list[str]:
         if self._pre_quantized:
-            return self._move_quantized_layer_to_device(state_dict)
+            if layer_name.startswith("model.layers."):
+                return self._move_quantized_layer_to_device(state_dict)
+            # Non-decoder layers (embed, norm, lm_head) live on plain
+            # nn.Linear / nn.Embedding modules which cannot hold bnb params.
+            # Old cached splits may still contain quant-state entries —
+            # dequantize them back to fp16 before setting.
+            state_dict = self._ensure_dequantized(state_dict)
 
         moved = list(state_dict.keys())
         for param_name in moved:
@@ -333,6 +341,32 @@ class ChiquitoModel(GenerationMixin):
                 dtype=self._dtype,
             )
         return moved
+
+    def _ensure_dequantized(
+        self, raw_state_dict: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        """Dequantize any packed entries back to fp16 (handles old cached splits)."""
+        base_params, qs_map = parse_quantized_state_dict(raw_state_dict)
+        if not qs_map:
+            return raw_state_dict
+
+        import bitsandbytes.functional as bnb_F
+        from bitsandbytes.functional import QuantState
+
+        result: dict[str, torch.Tensor] = {}
+        for name, tensor in base_params.items():
+            if name in qs_map:
+                qs = QuantState.from_dict(qs_map[name], device=self._device)
+                if self._quantization == "4bit":
+                    tensor = bnb_F.dequantize_4bit(tensor.to(self._device), qs).to(
+                        self._dtype
+                    )
+                else:
+                    tensor = bnb_F.dequantize_blockwise(tensor.to(self._device), qs).to(
+                        self._dtype
+                    )
+            result[name] = tensor
+        return result
 
     def _move_quantized_layer_to_device(
         self, raw_state_dict: dict[str, torch.Tensor]
@@ -556,7 +590,7 @@ class ChiquitoModel(GenerationMixin):
                 else:
                     state_dict = self._load_layer_to_cpu(layer_name)
 
-                moved = self._move_layer_to_device(state_dict)
+                moved = self._move_layer_to_device(state_dict, layer_name)
 
                 # Run layer
                 if layer_name == names["embed"]:
