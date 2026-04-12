@@ -110,7 +110,7 @@ The actual GPU computation for each layer takes only a few milliseconds during d
 
 ## The benchmark script
 
-[`benchmark.py`](../benchmark.py) provides a way to measure these trade-offs for any model. It runs inference with different `preload_to_ram` values and produces a comparison table:
+[`benchmark.py`](../benchmark.py) measures inference across multiple models, preload modes, and quantization levels. Before running benchmarks, it prints model info (parameter counts, per-layer and total sizes in fp16/8-bit/4-bit) for each model. Then it runs all combinations and produces a comparison table:
 
 ```python
 def run_once(model_id, preload, quantization=None):
@@ -129,16 +129,16 @@ def run_once(model_id, preload, quantization=None):
     ...
 ```
 
-([`benchmark.py:24-50`](../benchmark.py#L24-L50))
-
 Usage:
 ```bash
-python benchmark.py --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
-                    --preload true false 5 10
+# Single model, default preload modes, no quantization
+uv run benchmark.py --model TinyLlama/TinyLlama-1.1B-Chat-v1.0
 
-python benchmark.py --model Qwen/Qwen2.5-Coder-32B-Instruct \
-                    --preload true 10 \
-                    --quantization 4bit
+# Multiple models with quantization comparison
+uv run benchmark.py \
+  --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 Qwen/Qwen2.5-7B \
+  --preload true false 5 \
+  --quantization false 4bit 8bit
 ```
 
 ## The complete dependency graph
