@@ -156,6 +156,24 @@ class TestPrepareInputsForGeneration:
         assert result["position_ids"].shape[1] == 2
 
 
+class TestGetTextConfig:
+    """Test _get_text_config with plain and composite configs."""
+
+    def test_plain_config_returned_as_is(self):
+        from chiquito.model import ChiquitoModel
+
+        config = MagicMock(spec=[])  # no text_config attribute
+        assert ChiquitoModel._get_text_config(config) is config
+
+    def test_composite_config_returns_text_config(self):
+        from chiquito.model import ChiquitoModel
+
+        text_cfg = MagicMock()
+        config = MagicMock()
+        config.text_config = text_cfg
+        assert ChiquitoModel._get_text_config(config) is text_cfg
+
+
 class TestChiquitoModelProperties:
     """Test simple properties/methods that don't need full model init."""
 

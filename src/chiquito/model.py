@@ -137,19 +137,28 @@ class ChiquitoModel(GenerationMixin):
             model_id_or_path, hf_token
         )
 
+        # Build whitelist of nn.Linear weights for quantization
+        quantizable_params = (
+            self._get_quantizable_param_names(model_id_or_path, hf_token)
+            if quantization
+            else None
+        )
+
         # Split model into per-layer files
         self._model_path, self._split_dir = find_or_create_split(
             model_id_or_path,
             all_layer_names,
             hf_token=hf_token,
             quantization=quantization,
+            quantizable_params=quantizable_params,
         )
 
         # Load config, tokenizer, generation config
         token_kwargs = {"token": hf_token} if hf_token else {}
-        self.config = AutoConfig.from_pretrained(
+        full_config = AutoConfig.from_pretrained(
             self._model_path, trust_remote_code=True, **token_kwargs
         )
+        self.config = self._get_text_config(full_config)
         self.tokenizer = AutoTokenizer.from_pretrained(
             self._model_path, trust_remote_code=True, **token_kwargs
         )
@@ -165,6 +174,15 @@ class ChiquitoModel(GenerationMixin):
         if self._window_size is None:
             self._preload_all_layers()
 
+    @staticmethod
+    def _get_text_config(config: Any) -> Any:
+        """Return the text sub-config for composite (multimodal) models,
+        or the config itself for plain decoder-only models."""
+        text_config = getattr(config, "text_config", None)
+        if text_config is not None:
+            return text_config
+        return config
+
     def _build_layer_name_list_from_config(
         self, model_id_or_path: str, hf_token: str | None
     ) -> list[str]:
@@ -172,15 +190,8 @@ class ChiquitoModel(GenerationMixin):
         config = AutoConfig.from_pretrained(
             model_id_or_path, trust_remote_code=True, **token_kwargs
         )
-        with init_empty_weights():
-            model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
-
-        # Count layers
-        module = model
-        for attr in self.LAYER_NAMES["layer_prefix"].split("."):
-            module = getattr(module, attr)
-        n_layers = len(module)
-        del model
+        text_config = self._get_text_config(config)
+        n_layers = text_config.num_hidden_layers
 
         names = self.LAYER_NAMES
         return (
@@ -188,6 +199,37 @@ class ChiquitoModel(GenerationMixin):
             + [f"{names['layer_prefix']}.{i}" for i in range(n_layers)]
             + [names["norm"], names["lm_head"]]
         )
+
+    def _get_quantizable_param_names(
+        self, model_id_or_path: str, hf_token: str | None
+    ) -> set[str] | None:
+        """Return the set of weight names (in on-disk format) that belong to
+        ``nn.Linear`` modules and are safe to quantize with bitsandbytes.
+
+        Builds a temporary meta-device model to inspect module types. Returns
+        ``None`` on failure, which tells the splitter to fall back to
+        quantizing all 2-D tensors.
+        """
+        token_kwargs = {"token": hf_token} if hf_token else {}
+        config = AutoConfig.from_pretrained(
+            model_id_or_path, trust_remote_code=True, **token_kwargs
+        )
+        text_config = self._get_text_config(config)
+
+        try:
+            with init_empty_weights():
+                model = AutoModelForCausalLM.from_config(
+                    text_config, trust_remote_code=True
+                )
+        except Exception:
+            return None
+
+        names: set[str] = set()
+        for mod_name, module in model.named_modules():
+            if isinstance(module, nn.Linear):
+                names.add(f"{mod_name}.weight")
+        del model
+        return names
 
     def _init_model(self):
         self.model: Any = None
@@ -294,6 +336,16 @@ class ChiquitoModel(GenerationMixin):
         self.layers.append(module)
         self.layer_names.append(names["lm_head"])
 
+    def _remap_state_dict_keys(
+        self, state_dict: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        """Remap on-disk state_dict keys to model-object keys.
+
+        Override in subclasses where on-disk weight names differ from model
+        attribute paths (e.g. composite / multimodal models).
+        """
+        return state_dict
+
     def _preload_all_layers(self):
         self._ram_cache = {}
         pin = torch.cuda.is_available()
@@ -323,7 +375,7 @@ class ChiquitoModel(GenerationMixin):
         self, state_dict: dict[str, torch.Tensor], layer_name: str = ""
     ) -> list[str]:
         if self._pre_quantized:
-            if layer_name.startswith("model.layers."):
+            if layer_name.startswith(self.LAYER_NAMES["layer_prefix"] + "."):
                 return self._move_quantized_layer_to_device(state_dict)
             # Non-decoder layers (embed, norm, lm_head) live on plain
             # nn.Linear / nn.Embedding modules which cannot hold bnb params.
@@ -342,6 +394,34 @@ class ChiquitoModel(GenerationMixin):
             )
         return moved
 
+    def _dequantize_tensor(
+        self, tensor: torch.Tensor, qs_entries: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Dequantize a single packed tensor back to fp16, restoring original shape.
+
+        For large fused tensors (3-D+, e.g. MoE expert weights) the packed
+        data and quant-state are freed immediately after dequantization so
+        that peak VRAM only contains the full fp16 result, not both the
+        packed source *and* the result simultaneously.
+        """
+        import bitsandbytes.functional as bnb_F
+        from bitsandbytes.functional import QuantState
+
+        original_shape = qs_entries.pop("original_shape", None)
+        qs = QuantState.from_dict(qs_entries, device=self._device)
+        gpu_tensor = tensor.to(self._device)
+        if self._quantization == "4bit":
+            out = bnb_F.dequantize_4bit(gpu_tensor, qs).to(self._dtype)
+        else:
+            out = bnb_F.dequantize_blockwise(gpu_tensor, qs).to(self._dtype)
+        # Free packed data + quant-state before the next tensor is loaded.
+        # For fused expert tensors this reclaims ~1 GB of VRAM.
+        del gpu_tensor, qs
+        if original_shape is not None:
+            clean_gpu_memory()
+            out = out.reshape(original_shape.tolist())
+        return out
+
     def _ensure_dequantized(
         self, raw_state_dict: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
@@ -350,21 +430,10 @@ class ChiquitoModel(GenerationMixin):
         if not qs_map:
             return raw_state_dict
 
-        import bitsandbytes.functional as bnb_F
-        from bitsandbytes.functional import QuantState
-
         result: dict[str, torch.Tensor] = {}
         for name, tensor in base_params.items():
             if name in qs_map:
-                qs = QuantState.from_dict(qs_map[name], device=self._device)
-                if self._quantization == "4bit":
-                    tensor = bnb_F.dequantize_4bit(tensor.to(self._device), qs).to(
-                        self._dtype
-                    )
-                else:
-                    tensor = bnb_F.dequantize_blockwise(tensor.to(self._device), qs).to(
-                        self._dtype
-                    )
+                tensor = self._dequantize_tensor(tensor, qs_map[name])
             result[name] = tensor
         return result
 
@@ -373,39 +442,55 @@ class ChiquitoModel(GenerationMixin):
     ) -> list[str]:
         """Load pre-quantized weights, reconstruct bnb params, and place on device."""
         import bitsandbytes as bnb
-        from bitsandbytes.functional import QuantState
 
         base_params, qs_map = parse_quantized_state_dict(raw_state_dict)
         moved: list[str] = []
 
         for name, tensor in base_params.items():
             if name in qs_map:
-                # Reconstruct quantized parameter from packed data + quant state
-                qs = QuantState.from_dict(qs_map[name], device=self._device)
-                if self._quantization == "4bit":
-                    param = bnb.nn.Params4bit(
-                        tensor,
-                        requires_grad=False,
-                        quant_state=qs,
-                        quant_type=qs.quant_type,
-                        blocksize=qs.blocksize,
-                        bnb_quantized=True,
+                qs_entries = qs_map[name]
+                if "original_shape" in qs_entries:
+                    # Fused 3-D+ tensor (e.g. MoE expert weights): dequantize
+                    # to fp16 and set as a regular tensor — Params4bit only
+                    # supports nn.Linear (2-D).
+                    value = self._dequantize_tensor(tensor, qs_entries)
+                    set_module_tensor_to_device(
+                        self.model,
+                        name,
+                        self._device,
+                        value=value,
+                        dtype=self._dtype,
                     )
                 else:
-                    param = bnb.nn.Int8Params(
-                        tensor,
-                        requires_grad=False,
-                        has_fp16_weights=False,
-                    )
-                    param.quant_state = qs
+                    # Standard 2-D nn.Linear weight: use Params4bit / Int8Params
+                    # for on-the-fly dequantization during forward.
+                    from bitsandbytes.functional import QuantState
 
-                # Set directly on module, bypassing set_module_tensor_to_device
-                # which would attempt to re-quantize.
-                splits = name.split(".")
-                module = self.model
-                for s in splits[:-1]:
-                    module = getattr(module, s)
-                module._parameters[splits[-1]] = param.to(self._device)
+                    qs = QuantState.from_dict(qs_entries, device=self._device)
+                    if self._quantization == "4bit":
+                        param = bnb.nn.Params4bit(
+                            tensor,
+                            requires_grad=False,
+                            quant_state=qs,
+                            quant_type=qs.quant_type,
+                            blocksize=qs.blocksize,
+                            bnb_quantized=True,
+                        )
+                    else:
+                        param = bnb.nn.Int8Params(
+                            tensor,
+                            requires_grad=False,
+                            has_fp16_weights=False,
+                        )
+                        param.quant_state = qs
+
+                    # Set directly on module, bypassing set_module_tensor_to_device
+                    # which would attempt to re-quantize.
+                    splits = name.split(".")
+                    module = self.model
+                    for s in splits[:-1]:
+                        module = getattr(module, s)
+                    module._parameters[splits[-1]] = param.to(self._device)
             else:
                 set_module_tensor_to_device(
                     self.model,
@@ -427,6 +512,16 @@ class ChiquitoModel(GenerationMixin):
         return self._dtype
 
     # --- Override points for subclasses ---
+
+    def _cleanup_moved_params(self, moved: list[str]) -> None:
+        """Move layer weights back to meta device and free GPU memory.
+
+        Override in subclasses that set non-parameter attributes (e.g. lazy
+        expert wrappers) which ``set_module_tensor_to_device`` cannot handle.
+        """
+        for param_name in moved:
+            set_module_tensor_to_device(self.model, param_name, "meta")
+        clean_gpu_memory()
 
     def _compute_position_embeddings(
         self, hidden_states: torch.Tensor, position_ids: torch.Tensor
@@ -473,6 +568,10 @@ class ChiquitoModel(GenerationMixin):
 
     def can_generate(self) -> bool:
         return True
+
+    def set_experts_implementation(self, *args: Any, **kwargs: Any) -> None:
+        """No-op — chiquito loads one layer at a time, so MoE expert
+        dispatch optimisations from ``PreTrainedModel`` do not apply."""
 
     def prepare_inputs_for_generation(self, input_ids, attention_mask=None, **kwargs):
         past_key_values = kwargs.get("past_key_values")
@@ -590,6 +689,7 @@ class ChiquitoModel(GenerationMixin):
                 else:
                     state_dict = self._load_layer_to_cpu(layer_name)
 
+                state_dict = self._remap_state_dict_keys(state_dict)
                 moved = self._move_layer_to_device(state_dict, layer_name)
 
                 # Run layer
@@ -614,9 +714,7 @@ class ChiquitoModel(GenerationMixin):
                     )
 
                 # Free GPU memory (weights only, not KV cache)
-                for param_name in moved:
-                    set_module_tensor_to_device(self.model, param_name, "meta")
-                clean_gpu_memory()
+                self._cleanup_moved_params(moved)
 
                 # Release layer from sliding window cache
                 if self._window_cache is not None:

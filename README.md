@@ -115,7 +115,7 @@ All modes produce identical output. With a larger model, the preload advantage s
 | preload_to_ram | quantization | load (s) | gen (s) | tokens | tok/s |
 |---|---|---|---|---|---|
 | `True` | — | — | — | — | — |
-| `False` | `True` | 11.01 | 188.73 | 20 | 0.11 |
+| `False` | 4bit | 11.01 | 188.73 | 20 | 0.11 |
 | `False` | `False` | 5.16 | 1828.81 | 20 | 0.01 |
 | `5` | `False` | 5.20 | 1857.62 | 20 | 0.01 |
 | `10` | `False` | 4.53 | 1857.56 | 20 | 0.01 |

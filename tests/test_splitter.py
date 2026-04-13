@@ -191,6 +191,43 @@ class TestSplitAndSaveLayers:
         assert len(quantize_calls) == 1
         assert "model.layers.0.self_attn.q_proj.weight" in quantize_calls[0]
 
+    def test_quantize_skips_non_decoder_layers_composite_names(self, tmp_path):
+        """Positional decoder detection works with composite model prefixes."""
+        model_path = tmp_path / "model"
+        tensors = {
+            "model.language_model.embed_tokens.weight": torch.randn(10, 4),
+            "model.language_model.layers.0.self_attn.q_proj.weight": torch.randn(4, 4),
+            "model.language_model.norm.weight": torch.randn(4),
+            "lm_head.weight": torch.randn(10, 4),
+        }
+        self._create_single_file_model(model_path, tensors)
+
+        layer_names = [
+            "model.language_model.embed_tokens",
+            "model.language_model.layers.0",
+            "model.language_model.norm",
+            "lm_head",
+        ]
+        split_and_save_layers(model_path, layer_names)
+
+        quantize_calls: list[dict] = []
+        original_quantize = __import__(
+            "chiquito.splitter", fromlist=["_quantize_state_dict"]
+        )._quantize_state_dict
+
+        def tracking_quantize(sd, quant, **kw):
+            quantize_calls.append(dict(sd))
+            return original_quantize(sd, quant, **kw)
+
+        with patch("chiquito.splitter._quantize_state_dict", side_effect=tracking_quantize):
+            split_and_save_layers(model_path, layer_names, quantization="4bit")
+
+        assert len(quantize_calls) == 1
+        assert (
+            "model.language_model.layers.0.self_attn.q_proj.weight"
+            in quantize_calls[0]
+        )
+
     def test_raises_when_no_model_files(self, tmp_path):
         import pytest
 
@@ -235,6 +272,7 @@ class TestFindOrCreateSplit:
             hf_token="tok",
             repo_id=None,
             quantization=None,
+            quantizable_params=None,
         )
 
     @patch("chiquito.splitter.resolve_model_path")
@@ -251,6 +289,7 @@ class TestFindOrCreateSplit:
             hf_token=None,
             repo_id="org/model",
             quantization=None,
+            quantizable_params=None,
         )
 
     @patch("chiquito.splitter.resolve_model_path")
@@ -261,7 +300,9 @@ class TestFindOrCreateSplit:
         mock_resolve.return_value = model_path
         mock_split.return_value = model_path / "chiquito_split_4bit"
 
-        find_or_create_split(str(model_path), ["layer1"], quantization="4bit")
+        find_or_create_split(
+            str(model_path), ["layer1"], quantization="4bit"
+        )
 
         mock_split.assert_called_once_with(
             model_path,
@@ -269,6 +310,7 @@ class TestFindOrCreateSplit:
             hf_token=None,
             repo_id=None,
             quantization="4bit",
+            quantizable_params=None,
         )
 
 

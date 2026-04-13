@@ -17,6 +17,7 @@ _QUANT_STATE_SUFFIXES = (
     ".quant_state.",
     ".nested_absmax",
     ".nested_quant_map",
+    ".original_shape",
 )
 
 
@@ -46,8 +47,18 @@ def _quantize_state_dict(
     state_dict: dict[str, torch.Tensor],
     quantization: str,
     device: str = "cuda:0",
+    quantizable_params: set[str] | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Quantize 2-D+ weight tensors and return packed data + quant-state entries.
+    """Quantize weight tensors and return packed data + quant-state entries.
+
+    Tensors with 2+ dimensions are candidates.  When *quantizable_params* is
+    provided, only 2-D tensors whose names appear in that set are quantized;
+    all other 2-D+ tensors (e.g. fused MoE expert weights stored as 3-D) are
+    quantized unconditionally as long as ``ndim >= 2``.
+
+    Higher-dimensional tensors are reshaped to 2-D before quantization and the
+    original shape is stored in a ``<name>.original_shape`` entry so the loader
+    can restore it after dequantization.
 
     Supports ``"4bit"`` (NF4) and ``"8bit"`` (block-wise absmax).
     """
@@ -58,8 +69,21 @@ def _quantize_state_dict(
         if tensor.ndim < 2:
             result[name] = tensor
             continue
+        if (
+            quantizable_params is not None
+            and name not in quantizable_params
+            and tensor.ndim == 2
+        ):
+            # quantizable_params only covers nn.Linear (2-D) weights.
+            # Higher-dim tensors (fused expert weights) are always quantized.
+            result[name] = tensor
+            continue
 
-        gpu_tensor = tensor.to(torch.float16).to(device).contiguous()
+        # Flatten to 2-D for bitsandbytes; save original shape for 3-D+.
+        original_shape = tensor.shape
+        flat = tensor.reshape(-1, tensor.shape[-1])
+
+        gpu_tensor = flat.to(torch.float16).to(device).contiguous()
         if quantization == "4bit":
             packed, quant_state = F.quantize_4bit(
                 gpu_tensor, quant_type="nf4", blocksize=64
@@ -75,6 +99,11 @@ def _quantize_state_dict(
         for qs_key, qs_val in quant_state.as_dict(packed=True).items():
             result[f"{name}.{qs_key}"] = (
                 qs_val.cpu() if isinstance(qs_val, torch.Tensor) else qs_val
+            )
+        # Store original shape so the loader can reshape after dequantization.
+        if len(original_shape) > 2:
+            result[f"{name}.original_shape"] = torch.tensor(
+                original_shape, dtype=torch.int64
             )
         del gpu_tensor, packed, quant_state
 
@@ -117,6 +146,7 @@ def split_and_save_layers(
     hf_token: str | None = None,
     repo_id: str | None = None,
     quantization: str | None = None,
+    quantizable_params: set[str] | None = None,
 ) -> Path:
     dir_name = split_dir_name(quantization)
     split_dir = model_path / dir_name
@@ -142,13 +172,17 @@ def split_and_save_layers(
         # Only quantize decoder layers (model.layers.*).  Non-decoder layers
         # (embed_tokens, norm, lm_head) are kept in fp16 — they are small, and
         # HF quantizers deliberately skip them (modules_to_not_convert).
-        _DECODER_PREFIX = "model.layers."
+        # Use positional detection: first = embed, last two = norm + lm_head,
+        # everything in between is a decoder layer.
+        non_decoder_layers = {layer_names[0], layer_names[-2], layer_names[-1]}
         for layer_name in tqdm(layer_names, desc=f"Quantizing layers ({quantization})"):
             if is_layer_split(split_dir, layer_name):
                 continue
             fp16_data = load_safetensors(layer_file_path(base_dir, layer_name))
-            if layer_name.startswith(_DECODER_PREFIX):
-                quantized = _quantize_state_dict(fp16_data, quantization)
+            if layer_name not in non_decoder_layers:
+                quantized = _quantize_state_dict(
+                    fp16_data, quantization, quantizable_params=quantizable_params
+                )
             else:
                 quantized = fp16_data
             save_safetensors(quantized, layer_file_path(split_dir, layer_name))
@@ -243,6 +277,7 @@ def find_or_create_split(
     layer_names: list[str],
     hf_token: str | None = None,
     quantization: str | None = None,
+    quantizable_params: set[str] | None = None,
 ) -> tuple[Path, Path]:
     model_path = resolve_model_path(model_id_or_path, hf_token)
 
@@ -255,5 +290,6 @@ def find_or_create_split(
         hf_token=hf_token,
         repo_id=repo_id,
         quantization=quantization,
+        quantizable_params=quantizable_params,
     )
     return model_path, split_dir
