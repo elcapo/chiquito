@@ -1,0 +1,170 @@
+[
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": false,
+      "quantization": "4bit"
+    },
+    "results": {
+      "output": "The reason why we need local AI is because it can help us to solve complex problems that are not easily solved by traditional AI. For",
+      "load_time": 8.0925,
+      "generation_time": 170.9887,
+      "tokens_per_second": 0.12
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": true,
+      "quantization": "4bit"
+    },
+    "results": {
+      "output": "The reason why we need local AI is because it can help us to solve complex problems that are not easily solved by traditional AI. For",
+      "load_time": 10.5831,
+      "generation_time": 162.2205,
+      "tokens_per_second": 0.12
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": false,
+      "quantization": null
+    },
+    "results": {
+      "output": "The reason why we need local AI is because it can help us to solve complex problems that are not easily solved by traditional methods. For example",
+      "load_time": 1.9695,
+      "generation_time": 173.8552,
+      "tokens_per_second": 0.12
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": false,
+      "quantization": "4bit"
+    },
+    "results": {
+      "output": "The reason why we need local AI is that it can provide faster and more efficient processing of data, as well as better privacy and security.",
+      "load_time": 11.0265,
+      "generation_time": 655.2611,
+      "tokens_per_second": 0.03
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": true,
+      "quantization": "4bit"
+    },
+    "results": {
+      "output": "The reason why we need local AI is that it can provide faster and more efficient processing of data, as well as better privacy and security.",
+      "load_time": 70.8863,
+      "generation_time": 531.9503,
+      "tokens_per_second": 0.04
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": false,
+      "quantization": null
+    },
+    "results": {
+      "output": "The reason why we need local AI is that it can provide faster and more efficient processing of data, which is crucial for real-time applications such",
+      "load_time": 3.7174,
+      "generation_time": 2063.6922,
+      "tokens_per_second": 0.01
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "Qwen/Qwen3.5-122B-A10B",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": false,
+      "quantization": "4bit"
+    },
+    "results": {
+      "output": "The reason why we need local AI is because it is more secure and private.\nThe reason why we need local AI is because it is",
+      "load_time": 16.4814,
+      "generation_time": 2602.2517,
+      "tokens_per_second": 0.01
+    }
+  },
+  {
+    "system": {
+      "processor": "Intel(R) Core(TM) i9-10980HK CPU @ 2.40GHz",
+      "ram": "63 GB",
+      "gpu": "NVIDIA GeForce RTX 2080 Super",
+      "vram": "8 GB"
+    },
+    "benchmark": {
+      "model": "Qwen/Qwen3.5-122B-A10B",
+      "prompt": "The reason why we need local AI is",
+      "max_tokens": 20,
+      "preload": 5,
+      "quantization": "4bit"
+    },
+    "results": {
+      "output": "The reason why we need local AI is because it is more secure and private.\nThe reason why we need local AI is because it is",
+      "load_time": 16.9759,
+      "generation_time": 1870.2647,
+      "tokens_per_second": 0.01
+    }
+  }
+]

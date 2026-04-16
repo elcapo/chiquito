@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-"""Benchmark Chiquito inference across different preload_to_ram modes."""
+"""Benchmark Chiquito inference."""
 
 import argparse
+import json
 import math
 import platform
 import time
+from pathlib import Path
 
 import torch
 
@@ -45,16 +47,62 @@ def _get_total_ram() -> str:
     return "Unknown"
 
 
-def print_system_info() -> None:
-    print(f"Processor: {_get_cpu_name()}")
-    print(f"RAM: {_get_total_ram()}")
+def _get_system_info() -> dict:
+    gpu = "not available"
+    vram = "not available"
     if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(0)
-        print(f"GPU: {props.name}")
-        print(f"VRAM: {_format_bytes(props.total_memory)}")
-    else:
-        print("GPU: not available")
+        gpu = props.name
+        vram = _format_bytes(props.total_memory)
+    return {
+        "processor": _get_cpu_name(),
+        "ram": _get_total_ram(),
+        "gpu": gpu,
+        "vram": vram,
+    }
+
+
+def _print_system_info(info: dict) -> None:
+    print("System")
+    for key, value in info.items():
+        label = key.upper() if len(key) <= 4 else key.capitalize()
+        print(f"  {label}: {value}")
     print()
+
+
+BENCHMARKS_PATH = Path(__file__).resolve().parent / "resources" / "benchmarks.json"
+
+
+def _save_benchmark(
+    system: dict,
+    model_id: str,
+    preload: bool | int,
+    quantization: bool | str,
+    result: dict,
+) -> None:
+    entries: list = []
+    if BENCHMARKS_PATH.exists():
+        entries = json.loads(BENCHMARKS_PATH.read_text())
+
+    entry = {
+        "system": system,
+        "benchmark": {
+            "model": model_id,
+            "prompt": PROMPT,
+            "max_tokens": MAX_NEW_TOKENS,
+            "preload": preload,
+            "quantization": quantization,
+        },
+        "results": {
+            "output": result["text"],
+            "load_time": round(result["load_time"], 4),
+            "generation_time": round(result["generation_time"], 4),
+            "tokens_per_second": round(result["tokens_per_second"], 2),
+        },
+    }
+    entries.append(entry)
+
+    BENCHMARKS_PATH.write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n")
 
 
 def parse_preload_value(v: str) -> bool | int:
@@ -62,12 +110,17 @@ def parse_preload_value(v: str) -> bool | int:
         return True
     if v.lower() == "false":
         return False
-    return int(v)
+    try:
+        return int(v)
+    except ValueError as err:
+        raise argparse.ArgumentTypeError(
+            f"invalid value '{v}': must be 'true', 'false', or an integer"
+        ) from err
 
 
-def parse_quantization_value(v: str) -> bool | str:
+def parse_quantization_value(v: str) -> str | None:
     if v.lower() == "false":
-        return False
+        return None
     return v
 
 
@@ -112,7 +165,7 @@ def main():
     parser.add_argument(
         "--preload",
         default="false",
-        choices=["true", "false", "5"],
+        type=parse_preload_value,
         help="preload_to_ram values to benchmark (true, false, or integer window sizes)",
     )
     parser.add_argument(
@@ -123,10 +176,11 @@ def main():
     )
     args = parser.parse_args()
 
-    preload_value = parse_preload_value(args.preload)
+    preload_value = args.preload
     quantization_value = parse_quantization_value(args.quantization)
 
-    print_system_info()
+    system_info = _get_system_info()
+    _print_system_info(system_info)
     print(f"Model: {args.model}")
     print(f"Prompt: {PROMPT!r}")
     print(f"Maximum tokens: {MAX_NEW_TOKENS}")
@@ -143,6 +197,9 @@ def main():
     print(f"Load time (s): {result['load_time']}")
     print(f"Generation time (s): {result['generation_time']}")
     print(f"Tokens per second: {result['tokens_per_second']}")
+
+    _save_benchmark(system_info, args.model, preload_value, quantization_value, result)
+    print(f"\nBenchmark saved to {BENCHMARKS_PATH}")
 
 
 if __name__ == "__main__":
