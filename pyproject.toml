@@ -43,6 +43,11 @@ known-first-party = ["chiquito"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:.*torch\\.jit\\.script_method.*:DeprecationWarning",
+]
+
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "src"
