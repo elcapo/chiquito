@@ -2,15 +2,59 @@
 """Benchmark Chiquito inference across different preload_to_ram modes."""
 
 import argparse
+import math
+import platform
 import time
 
 import torch
 
 from chiquito import AutoModel
 
-
 PROMPT = "The reason why we need local AI is"
 MAX_NEW_TOKENS = 20
+
+
+def _format_bytes(n: int) -> str:
+    if n >= 1024**3:
+        return f"{math.ceil(n / 1024**3)} GB"
+    return f"{math.ceil(n / 1024**2)} MB"
+
+
+def _get_cpu_name() -> str:
+    if platform.system() == "Linux":
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if line.startswith("model name"):
+                        return line.split(":", 1)[1].strip()
+        except OSError:
+            pass
+    return platform.processor() or "Unknown"
+
+
+def _get_total_ram() -> str:
+    if platform.system() == "Linux":
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal"):
+                        kb = int(line.split()[1])
+                        return _format_bytes(kb * 1024)
+        except OSError:
+            pass
+    return "Unknown"
+
+
+def print_system_info() -> None:
+    print(f"Processor: {_get_cpu_name()}")
+    print(f"RAM: {_get_total_ram()}")
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        print(f"GPU: {props.name}")
+        print(f"VRAM: {_format_bytes(props.total_memory)}")
+    else:
+        print("GPU: not available")
+    print()
 
 
 def parse_preload_value(v: str) -> bool | int:
@@ -27,9 +71,13 @@ def parse_quantization_value(v: str) -> bool | str:
     return v
 
 
-def run_once(model_id: str, preload: bool | int, quantization: str | None = None) -> dict:
+def run_once(
+    model_id: str, preload: bool | int, quantization: str | None = None
+) -> dict:
     t0 = time.perf_counter()
-    model = AutoModel.from_pretrained(model_id, preload_to_ram=preload, quantization=quantization)
+    model = AutoModel.from_pretrained(
+        model_id, preload_to_ram=preload, quantization=quantization
+    )
     load_time = time.perf_counter() - t0
 
     tokens = model.tokenizer(PROMPT, return_tensors="pt")
@@ -58,7 +106,9 @@ def run_once(model_id: str, preload: bool | int, quantization: str | None = None
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True, help="HuggingFace model ID or local path")
+    parser.add_argument(
+        "--model", required=True, help="HuggingFace model ID or local path"
+    )
     parser.add_argument(
         "--preload",
         default="false",
@@ -76,6 +126,7 @@ def main():
     preload_value = parse_preload_value(args.preload)
     quantization_value = parse_quantization_value(args.quantization)
 
+    print_system_info()
     print(f"Model: {args.model}")
     print(f"Prompt: {PROMPT!r}")
     print(f"Maximum tokens: {MAX_NEW_TOKENS}")
@@ -83,7 +134,9 @@ def main():
     print(f"Quantization: {quantization_value}")
     print()
 
-    result = run_once(args.model, preload=preload_value, quantization=quantization_value)
+    result = run_once(
+        args.model, preload=preload_value, quantization=quantization_value
+    )
     print()
 
     print(f"Output: {result['text']}")
