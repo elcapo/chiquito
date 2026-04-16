@@ -34,4 +34,5 @@ Everything else is explained from scratch.
 ### Extensibility and integration
 
 11. [Architecture Extensibility](11-extensibility.md) — The `AutoModel` factory, `LAYER_NAMES`, and override points. Covers `auto_model.py`.
-12. [Putting It All Together](12-putting-it-together.md) — End-to-end flow, the dependency graph, and design decisions.
+12. [Mixture-of-Experts Models](12-moe-models.md) — Composite model naming, fused expert tensors, and lazy per-expert dequantization. Covers `composite_model.py` and `lazy_experts.py`.
+13. [Putting It All Together](13-putting-it-together.md) — End-to-end flow, the dependency graph, and design decisions.

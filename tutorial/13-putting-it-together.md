@@ -1,13 +1,15 @@
 # Putting It All Together
 
-Over the previous chapters we have built every piece of Chiquito: the splitter, the meta device model, the layer-by-layer forward pass, KV cache, memory management, three loading strategies, quantization, and architecture extensibility. This final chapter shows how all the pieces connect and traces the complete flow from construction to text generation.
+Over the previous chapters we have built every piece of Chiquito: the splitter, the meta device model, the layer-by-layer forward pass, KV cache, memory management, three loading strategies, quantization, architecture extensibility, and Mixture-of-Experts support. This final chapter shows how all the pieces connect and traces the complete flow from construction to text generation.
 
 ## The file map
 
 | File | Responsibility |
 |------|---------------|
-| [`__init__.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/__init__.py) | Package exports |
+| [`__init__.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/__init__.py) | Package exports + architecture registration |
 | [`auto_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/auto_model.py) | Factory + registry ([Architecture Extensibility](11-extensibility.md)) |
+| [`composite_model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/composite_model.py) | Composite/MoE model support ([Mixture-of-Experts Models](12-moe-models.md)) |
+| [`lazy_experts.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/lazy_experts.py) | Lazy per-expert dequantization ([Mixture-of-Experts Models](12-moe-models.md)) |
 | [`model.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/model.py) | Core engine ([The Forward Pass](06-forward-pass.md) through [Quantization](10-quantization.md)) |
 | [`splitter.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/splitter.py) | Checkpoint splitting + pre-quantization ([Splitting Checkpoints](05-checkpoint-splitting.md), [Quantization](10-quantization.md)) |
 | [`utils.py`](https://github.com/elcapo/chiquito/blob/0.1.0/src/chiquito/utils.py) | Memory + I/O helpers ([HuggingFace Models](03-huggingface-models.md), [Memory Management](08-memory-management.md)) |
@@ -146,7 +148,8 @@ uv run benchmark.py \
 ```
 User code
   └─ AutoModel.from_pretrained()        [auto_model.py]
-      └─ ChiquitoModel.__init__()       [model.py]
+      ├─ Registry lookup → ChiquitoModel or ChiquitoCompositeModel
+      └─ ChiquitoModel.__init__()       [model.py / composite_model.py]
           ├─ resolve_model_path()        [utils.py]
           ├─ find_or_create_split()      [splitter.py]
           │   ├─ split_and_save_layers() [splitter.py]
@@ -162,11 +165,13 @@ User code
   └─ model.generate()                   [GenerationMixin from transformers]
       └─ model.forward()                [model.py]
           ├─ _load_layer_to_cpu()        [model.py → utils.py or cache]
+          ├─ _remap_state_dict_keys()    [composite_model.py — disk→model key translation]
           ├─ _move_layer_to_device()     [model.py → accelerate]
-          │   └─ _move_quantized_layer_to_device()  [model.py → bitsandbytes]
-          │       └─ parse_quantized_state_dict()    [splitter.py]
+          │   └─ _move_quantized_layer_to_device()  [model.py / composite_model.py → bitsandbytes]
+          │       ├─ parse_quantized_state_dict()    [splitter.py]
+          │       └─ LazyDequantExperts.from_quantized()  [lazy_experts.py — MoE models]
           ├─ Layer execution             [transformers model internals]
-          ├─ set_module_tensor_to_device("meta")  [accelerate]
+          ├─ _cleanup_moved_params()     [model.py / composite_model.py]
           └─ clean_gpu_memory()          [utils.py]
 ```
 
@@ -181,6 +186,8 @@ User code
 | Sliding window as bounded buffer | Enables models that exceed RAM capacity with predictable memory usage |
 | Pre-quantized weight caching | Quantize once, cache to disk; subsequent runs load packed weights directly — faster transfers, less RAM |
 | Override points instead of config | Subclasses can change behavior (how to call a layer) not just data (what names to use) |
+| Lazy per-expert dequantization | MoE fused tensors stay packed on GPU; only the active expert is dequantized per forward call |
+| Dual name mappings for composite models | Decouple on-disk key prefixes from model-object attribute paths without touching the base engine |
 
 ## What you now know
 
@@ -197,5 +204,6 @@ Starting from just Python, the concept of an LLM, and the idea of inference, you
 9. **Loading strategies** — full preload, sliding window (producer-consumer), and disk-only with prefetch
 10. **Quantization** — 4-bit/8-bit compression to reduce transfer bottleneck
 11. **Extensibility** — factory pattern and override points for new architectures
+12. **Mixture-of-Experts** — composite model naming, fused expert tensors, and lazy per-expert dequantization
 
 These concepts enable running models that need 140 GB of VRAM on a GPU with 8 GB.
