@@ -85,7 +85,7 @@ Test system: Intel Core i9-10980HK, 64 GB RAM, NVIDIA RTX 2080 Super (8 GB VRAM)
 Run the benchmark script to compare modes on any model:
 
 ```bash
-uv run python benchmark.py --model <model_id> --preload true false 5 10
+uv run python benchmark.py --model <model_id> --preload [true|false|<n_layers>] --quantization [false|4bit|8bit]
 ```
 
 ### TinyLlama 1.1B
@@ -122,6 +122,17 @@ All modes produce identical output. With a larger model, the preload advantage s
 | `34` | `False` | 5.22 | 1871.65 | 20 | 0.01 |
 
 `preload_to_ram=True` could not be tested — the model weighs ~65 GB in fp16, which exceeds the 64 GB of available RAM. This is the scenario the sliding window mode was designed for. All tested modes produce identical output and perform similarly, confirming that the disk prefetch keeps up with GPU execution even at this scale.
+
+### Qwen3.5-122B-A10B (MoE, multimodal)
+
+| preload_to_ram | quantization | load (s) | gen (s) | tokens | tok/s |
+|---|---|---|---|---|---|
+| `False` | 4bit | 16.16 | 2155.27 | 20 | 0.01 |
+| `3` | 4bit | 16.33 | 2553.15 | 20 | 0.01 |
+
+> uv run python benchmark.py --model Qwen/Qwen3.5-122B-A10B --quantization 4bit --preload False 3
+
+A 122B-parameter mixture-of-experts model (10B active per token, 256 experts) running on an 8 GB GPU thanks to two specialized paths in `ChiquitoCompositeModel`: composite-config handling for multimodal architectures, and **lazy per-expert dequantization** that keeps the fused expert weights packed in 4-bit on the GPU and dequantizes only the ~8 selected experts per token (peak VRAM ~1.5 GB per layer instead of ~5.8 GB). See [`composite_model.py`](src/chiquito/composite_model.py) and [`lazy_experts.py`](src/chiquito/lazy_experts.py).
 
 ## Development
 
