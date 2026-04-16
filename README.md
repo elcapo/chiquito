@@ -80,7 +80,11 @@ On the first run, Chiquito pre-quantizes the weights and stores them in a dedica
 
 ## Benchmarks
 
-Test system: Intel Core i9-10980HK, 64 GB RAM, NVIDIA RTX 2080 Super (8 GB VRAM).
+Test system: Intel Core i9-10980HK, 63 GB RAM, NVIDIA RTX 2080 Super (8 GB VRAM).
+
+All benchmarks were run after the models had already been downloaded, split by layers, and quantized (where applicable), so first-run overhead (downloading, splitting, pre-quantization) is not reflected in the times below.
+
+Prompt: `"The reason why we need local AI is"`, 20 tokens generated.
 
 Run the benchmark script to compare modes on any model:
 
@@ -90,49 +94,40 @@ uv run python benchmark.py --model <model_id> --preload [true|false|<n_layers>] 
 
 ### TinyLlama 1.1B
 
-| preload_to_ram | load (s) | gen (s) | tokens | tok/s |
+| preload_to_ram | quantization | load (s) | gen (s) | tok/s |
 |---|---|---|---|---|
-| `True` | 7.91 | 55.10 | 20 | 0.36 |
-| `False` | 1.74 | 54.58 | 20 | 0.37 |
-| `5` | 1.74 | 55.85 | 20 | 0.36 |
-| `10` | 1.77 | 57.00 | 20 | 0.35 |
+| `False` | — | 1.97 | 173.86 | 0.12 |
+| `False` | 4bit | 8.09 | 170.99 | 0.12 |
+| `True` | 4bit | 10.58 | 162.22 | 0.12 |
 
-All modes produce identical output. On a small model that fits in VRAM, generation speed is similar across modes. The preload overhead shows up in load time. In this case, differences are not visible as disk I/O isn't the bottleneck.
+On a small model (1.1B parameters, 22 layers), generation speed is virtually identical across all modes at 0.12 tok/s. The model fits easily in both RAM and VRAM, so neither preloading nor quantization has a meaningful impact on throughput.
 
-### Qwen2.5-Coder 7B
-
-| preload_to_ram | load (s) | gen (s) | tokens | tok/s |
-|---|---|---|---|---|
-| `True` | 44.45 | 361.67 | 20 | 0.06 |
-| `False` | 1.74 | 391.50 | 20 | 0.05 |
-| `5` | 2.91 | 377.37 | 20 | 0.05 |
-| `10` | 2.82 | 373.87 | 20 | 0.05 |
-
-All modes produce identical output. With a larger model, the preload advantage starts to show: `preload_to_ram=True` is ~8% faster in generation time (361s vs 391s) thanks to pinned memory DMA transfers.
+The load time without quantization (1.97 s) is much lower than with 4-bit quantization (8–10 s) because loading pre-quantized weights involves extra deserialization work. Preloading to RAM adds a bit more load time (10.58 s vs 8.09 s) since all layers must be copied into memory upfront, but this overhead is negligible for such a small model.
 
 ### Qwen2.5-Coder 32B
 
-| preload_to_ram | quantization | load (s) | gen (s) | tokens | tok/s |
-|---|---|---|---|---|---|
-| `True` | — | — | — | — | — |
-| `False` | 4bit | 11.01 | 188.73 | 20 | 0.11 |
-| `False` | `False` | 5.16 | 1828.81 | 20 | 0.01 |
-| `5` | `False` | 5.20 | 1857.62 | 20 | 0.01 |
-| `10` | `False` | 4.53 | 1857.56 | 20 | 0.01 |
-| `34` | `False` | 5.22 | 1871.65 | 20 | 0.01 |
+| preload_to_ram | quantization | load (s) | gen (s) | tok/s |
+|---|---|---|---|---|
+| `False` | — | 3.72 | 2063.69 | 0.01 |
+| `False` | 4bit | 11.03 | 655.26 | 0.03 |
+| `True` | 4bit | 70.89 | 531.95 | 0.04 |
 
-`preload_to_ram=True` could not be tested — the model weighs ~65 GB in fp16, which exceeds the 64 GB of available RAM. This is the scenario the sliding window mode was designed for. All tested modes produce identical output and perform similarly, confirming that the disk prefetch keeps up with GPU execution even at this scale.
+With a 32B-parameter model (64 layers), the effect of quantization and preloading becomes evident:
 
-### Qwen3.5-122B-A10B (MoE, multimodal)
+- **Without quantization**, each layer is loaded in fp16 (~2 GB per layer). Generation takes over 34 minutes because every layer transfer from disk to GPU is large and slow.
+- **4-bit quantization** reduces the per-layer size by ~4x, cutting generation time to ~11 minutes — a **3.1x speedup**.
+- **Preloading to RAM** with 4-bit quantization gives a further **19% speedup** (532 s vs 655 s) because layer weights are served from RAM over PCIe instead of being read from disk. The tradeoff is a much higher load time (71 s) as all 64 quantized layers are copied into RAM upfront. This is the sweet spot for models that fit in RAM after quantization: a 32B model goes from ~65 GB (fp16) to ~16 GB (4-bit), well within the 63 GB of available RAM.
 
-| preload_to_ram | quantization | load (s) | gen (s) | tokens | tok/s |
-|---|---|---|---|---|---|
-| `False` | 4bit | 16.16 | 2155.27 | 20 | 0.01 |
-| `3` | 4bit | 16.33 | 2553.15 | 20 | 0.01 |
+### Qwen3.5-122B-A10B (MoE)
 
-> uv run python benchmark.py --model Qwen/Qwen3.5-122B-A10B --quantization 4bit --preload False 3
+| preload_to_ram | quantization | load (s) | gen (s) | tok/s |
+|---|---|---|---|---|
+| `False` | 4bit | 16.48 | 2602.25 | 0.01 |
+| `5` | 4bit | 16.98 | 1870.26 | 0.01 |
 
 A 122B-parameter mixture-of-experts model (10B active per token, 256 experts) running on an 8 GB GPU thanks to two specialized paths in `ChiquitoCompositeModel`: composite-config handling for multimodal architectures, and **lazy per-expert dequantization** that keeps the fused expert weights packed in 4-bit on the GPU and dequantizes only the ~8 selected experts per token (peak VRAM ~1.5 GB per layer instead of ~5.8 GB). See [`composite_model.py`](src/chiquito/composite_model.py) and [`lazy_experts.py`](src/chiquito/lazy_experts.py).
+
+Even with 4-bit quantization, this model is far too large to fit entirely in RAM. The **sliding window** (`preload_to_ram=5`) keeps 5 layers buffered in RAM at a time, and a background thread prefetches upcoming layers into freed slots. This yields a **28% speedup** in generation time (1870 s vs 2602 s) compared to pure disk-based loading, while keeping RAM usage bounded. Load times are nearly identical (~17 s) since only a handful of layers are preloaded in either case.
 
 ## Development
 
